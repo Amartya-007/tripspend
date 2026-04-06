@@ -1,0 +1,5 @@
+{
+  "name": "TripSpend",
+  "description": "A lightweight group trip expense tracker to manage shared budgets and spending.",
+  "requestFramePermissions": []
+}

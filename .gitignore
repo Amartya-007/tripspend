@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Environment variables
+.env*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# TypeScript
+*.tsbuildinfo
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# Capacitor
+android/app/src/main/assets/public/
+
+# iOS (if added later)
+ios/App/Pods/
+ios/App/App/public/
+*.xcworkspace/xcuserdata/

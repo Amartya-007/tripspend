@@ -1,0 +1,147 @@
+import React from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Expense, TripSetup } from '../utils/calculations.ts';
+import { formatCurrency } from '../utils/cn';
+import { Calendar, Tag, ArrowLeft, Pencil, Trash2, ReceiptText, AlertCircle } from 'lucide-react';
+import { format, isBefore, parseISO, startOfDay } from 'date-fns';
+
+interface ExpenseDetailProps {
+  expenses: Expense[];
+  onDelete: (id: string) => void;
+  setup: TripSetup | null;
+}
+
+export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete, setup }) => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+
+  const expense = expenses.find((item) => item.id === id);
+
+  if (!expense) {
+    return (
+      <div className="page-shell">
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <p className="text-slate-700 font-semibold">Expense not found.</p>
+          <button
+            onClick={() => navigate('/expenses')}
+            className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold"
+          >
+            Back to Expenses
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(expense.date)), startOfDay(new Date()));
+  const receipts = (expense.receipts && expense.receipts.length > 0)
+    ? expense.receipts
+    : (expense.receiptImage ? [{ image: expense.receiptImage, name: expense.receiptName }] : []);
+
+  const handleDelete = () => {
+    if (isLocked) {
+      alert('This expense is locked and cannot be deleted.');
+      return;
+    }
+
+    const shouldDelete = window.confirm('Delete this expense?');
+    if (!shouldDelete) return;
+
+    onDelete(expense.id);
+    navigate('/expenses');
+  };
+
+  return (
+    <div className="page-shell space-y-6">
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => navigate('/expenses')}
+          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
+      </div>
+
+      {isLocked && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-amber-700 text-sm font-medium">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          This expense is locked for editing/deleting.
+        </div>
+      )}
+
+      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Amount</p>
+            <p className="text-3xl font-black text-slate-900">{formatCurrency(expense.amount)}</p>
+          </div>
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700">{expense.category}</span>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Calendar className="w-4 h-4" />
+          {format(parseISO(expense.date), 'EEEE, MMM dd, yyyy')}
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Note</p>
+          <p className="text-sm text-slate-700">{expense.note || 'No note added'}</p>
+        </div>
+
+        {(expense.tags || []).length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Tags</p>
+            <div className="flex flex-wrap gap-2">
+              {(expense.tags || []).map((tag) => (
+                <span key={`${expense.id}-${tag}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
+                  <Tag className="w-3 h-3" />
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {receipts.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1">
+              <ReceiptText className="w-3 h-3" />
+              Receipts ({receipts.length})
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {receipts.map((receipt, idx) => (
+                <img
+                  key={`${expense.id}-receipt-${idx}`}
+                  src={receipt.image}
+                  alt={receipt.name || `Receipt ${idx + 1}`}
+                  className="w-full h-36 object-cover rounded-2xl border border-slate-100"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => navigate(`/edit/${expense.id}`)}
+          disabled={Boolean(isLocked)}
+          className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold inline-flex items-center justify-center gap-2"
+        >
+          <Pencil className="w-4 h-4" />
+          Edit
+        </button>
+
+        <button
+          onClick={handleDelete}
+          disabled={Boolean(isLocked)}
+          className="w-full py-3 rounded-2xl bg-red-50 hover:bg-red-100 disabled:bg-slate-100 text-red-600 disabled:text-slate-400 font-bold inline-flex items-center justify-center gap-2 border border-red-100 disabled:border-slate-200"
+        >
+          <Trash2 className="w-4 h-4" />
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+};
