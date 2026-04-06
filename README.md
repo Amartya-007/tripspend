@@ -1,20 +1,77 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# TripSpend
 
-# Run and deploy your AI Studio app
+A mobile-first group trip expense tracker built with React + Capacitor. Track shared spending, split costs, scan receipts, and get smart budget insights — all offline, no account needed.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/5ee32756-610c-44ce-aef3-489ee2de0e21
+- **Budget tracking** — set per-person budget, monitor burn rate and daily limits
+- **Smart expense entry** — voice input, receipt camera/OCR, AI categorization (Gemini)
+- **Group splits** — track who paid, split equally or custom amounts, settlement calculator
+- **Analytics** — category breakdown, daily spending trends, deficit projections
+- **Receipt management** — attach multiple photos per expense with auto-compression
+- **Backup & restore** — export/import JSON, share summary image card
+- **Offline-first** — everything stored locally, no backend required
+- **Android app** — built with Capacitor, native camera, share, and voice support
 
-## Run Locally
+## Tech Stack
 
-**Prerequisites:**  Node.js
+- React 19 + TypeScript
+- Capacitor 8 (Android)
+- Tailwind CSS 4
+- Vite 6
+- Tesseract.js (OCR)
+- Google Gemini API (optional AI categorization)
 
+## Getting Started
+
+**Prerequisites:** Node.js 18+
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+
+2. Copy the env file and optionally add your Gemini API key:
+   ```bash
+   cp .env.example .env.local
+   ```
+   > `VITE_GEMINI_API_KEY` is optional. Without it, AI categorization is disabled but everything else works.
+
+3. Run the dev server:
+   ```bash
+   npm run dev
+   ```
+
+## Android Build
+
+Make sure you have Android Studio and the Android SDK installed.
+
+```bash
+# Build the web app
+npm run build
+
+# Sync to Android
+npx cap sync android
+
+# Open in Android Studio
+npx cap open android
+```
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_GEMINI_API_KEY` | No | Enables AI-powered receipt categorization via Gemini 2.5 Flash |
+
+## Project Structure
+
+```
+src/
+├── screens/        # All app screens (Dashboard, AddExpense, Analytics, etc.)
+├── components/     # Shared components (BottomNav)
+├── hooks/          # useTripData — state management + localStorage persistence
+└── utils/          # calculations, AI categorization, helpers
+android/            # Capacitor Android project
+```
+
+## Made by Amartya Vishwakarma
