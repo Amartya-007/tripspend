@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, Edit3, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Check, UserCircle2 } from 'lucide-react';
 import { TripSetup } from '../utils/calculations.ts';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -9,148 +9,153 @@ interface GroupMemberManagerProps {
   onUpdate: (setup: TripSetup) => void;
 }
 
+const COLORS = [
+  'bg-blue-100 text-blue-700',
+  'bg-purple-100 text-purple-700',
+  'bg-emerald-100 text-emerald-700',
+  'bg-orange-100 text-orange-700',
+  'bg-pink-100 text-pink-700',
+  'bg-cyan-100 text-cyan-700',
+];
+
 export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, onUpdate }) => {
   const navigate = useNavigate();
-  const [members, setMembers] = useState<string[]>(setup?.participants || []);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState('');
+  const [editName, setEditName] = useState('');
   const [newMember, setNewMember] = useState('');
 
-  if (!setup) {
-    return (
-      <div className="page-shell">
-        <div className="text-slate-600">No trip setup found</div>
-      </div>
-    );
-  }
+  if (!setup) return null;
 
-  const handleAddMember = () => {
-    if (newMember.trim() && !members.includes(newMember.trim())) {
-      setMembers([...members, newMember.trim()]);
-      setNewMember('');
-    }
-  };
+  const members = setup.participants || [];
 
-  const handleEditMember = (idx: number) => {
+  const commit = useCallback((participants: string[]) => {
+    onUpdate({ ...setup, participants, peopleCount: participants.length });
+  }, [setup, onUpdate]);
+
+  const openEdit = useCallback((idx: number, name: string) => {
     setEditingIdx(idx);
-    setEditValue(members[idx]);
-  };
+    setEditName(name);
+  }, []);
 
-  const handleSaveEdit = (idx: number) => {
-    if (editValue.trim()) {
-      const updated = [...members];
-      updated[idx] = editValue.trim();
-      setMembers(updated);
-      setEditingIdx(null);
-    }
-  };
+  const saveEdit = useCallback((idx: number) => {
+    const trimmed = editName.trim();
+    if (!trimmed) return;
+    const updated = [...members];
+    updated[idx] = trimmed;
+    commit(updated);
+    setEditingIdx(null);
+  }, [editName, members, commit]);
 
-  const handleDeleteMember = (idx: number) => {
-    if (members.length > 1) {
-      setMembers(members.filter((_, i) => i !== idx));
-    }
-  };
+  const deleteMember = useCallback((idx: number) => {
+    if (members.length <= 1) return;
+    commit(members.filter((_, i) => i !== idx));
+    if (editingIdx === idx) setEditingIdx(null);
+  }, [members, commit, editingIdx]);
 
-  const handleSave = () => {
-    onUpdate({
-      ...setup,
-      participants: members.filter(m => m.trim()),
-      peopleCount: members.length,
-    });
-    navigate('/settings');
-  };
+  const addMember = useCallback(() => {
+    const trimmed = newMember.trim();
+    if (!trimmed || members.includes(trimmed)) return;
+    commit([...members, trimmed]);
+    setNewMember('');
+  }, [newMember, members, commit]);
 
   return (
     <div className="page-shell space-y-6">
-      <div className="flex items-center justify-between page-header">
-        <button
-          onClick={() => navigate('/settings')}
-          className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back
+      <div className="flex items-center gap-3 page-header">
+        <button onClick={() => navigate('/settings')} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors -ml-1">
+          <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="page-title text-2xl">Manage Members</h1>
-        <div className="w-8" />
+        <div>
+          <h1 className="page-title">Members</h1>
+          <p className="page-subtitle">{members.length} participant{members.length !== 1 ? 's' : ''}</p>
+        </div>
       </div>
 
-      <div className="space-y-3">
-        <AnimatePresence>
-          {members.map((member, idx) => (
-            <motion.div
-              key={`${idx}-${member}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, x: -100 }}
-              className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between gap-3"
-            >
-              {editingIdx === idx ? (
-                <div className="flex-1 flex gap-2">
-                  <input
-                    type="text"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    className="flex-1 input-field text-sm"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => handleSaveEdit(idx)}
-                    className="p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors"
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <span className="text-sm font-semibold text-slate-700 flex-1">{member}</span>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleEditMember(idx)}
-                      className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
+      <div className="space-y-2">
+        <AnimatePresence initial={false}>
+          {members.map((member, idx) => {
+            const isEditing = editingIdx === idx;
+            const colorClass = COLORS[idx % COLORS.length];
+
+            return (
+              <motion.div
+                key={`${idx}-${member}`}
+                layout
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, x: -60, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden"
+              >
+                {isEditing ? (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-base font-black flex-shrink-0 ${colorClass}`}>
+                        {(editName[0] || member[0]).toUpperCase()}
+                      </div>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && saveEdit(idx)}
+                        placeholder="Name"
+                        autoFocus
+                        className="flex-1 px-3 py-2 rounded-xl border border-blue-300 ring-2 ring-inset ring-blue-400 text-sm font-semibold text-slate-800 focus:outline-none bg-blue-50"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditingIdx(null)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold">
+                        Cancel
+                      </button>
+                      <button onClick={() => saveEdit(idx)} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold flex items-center justify-center gap-1.5">
+                        <Check className="w-4 h-4" /> Done
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => openEdit(idx, member)} className="w-full flex items-center gap-3 p-4 text-left">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-base font-black flex-shrink-0 ${colorClass}`}>
+                      {member[0].toUpperCase()}
+                    </div>
+                    <p className="font-bold text-slate-900 text-sm flex-1">{member}</p>
                     {members.length > 1 && (
                       <button
-                        onClick={() => handleDeleteMember(idx)}
-                        className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                        type="button"
+                        onClick={e => { e.stopPropagation(); deleteMember(idx); }}
+                        className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     )}
-                  </div>
-                </>
-              )}
-            </motion.div>
-          ))}
+                  </button>
+                )}
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
 
+      {/* Add member */}
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={newMember}
-          onChange={(e) => setNewMember(e.target.value)}
-          placeholder="Add new member..."
-          onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
-          className="input-field flex-1 text-sm"
-        />
+        <div className="flex-1 relative">
+          <UserCircle2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={newMember}
+            onChange={e => setNewMember(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addMember()}
+            placeholder="Add new member..."
+            className="input-field pl-10 text-sm"
+          />
+        </div>
         <button
-          onClick={handleAddMember}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          onClick={addMember}
+          disabled={!newMember.trim() || members.includes(newMember.trim())}
+          className="w-12 h-12 bg-blue-600 disabled:bg-slate-200 text-white rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-5 h-5" />
         </button>
       </div>
-
-      <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-        onClick={handleSave}
-        className="btn-primary w-full"
-      >
-        Save Changes
-      </motion.button>
     </div>
   );
 };

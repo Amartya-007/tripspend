@@ -10,6 +10,7 @@ import { ExpenseList } from './screens/ExpenseList';
 import { ExpenseDetail } from './screens/ExpenseDetail';
 import { Settings } from './screens/Settings';
 import { Analytics } from './screens/Analytics';
+import { Settlement } from './screens/Settlement';
 import { GroupMemberManager } from './screens/GroupMemberManager';
 import { CategoryManager } from './screens/CategoryManager';
 import { BottomNav } from './components/BottomNav';
@@ -63,6 +64,12 @@ const DeepLinkHandler = () => {
     };
   }, [navigate]);
 
+  return null;
+};
+
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
   return null;
 };
 
@@ -128,6 +135,7 @@ export default function App() {
     <Router>
       <DeepLinkHandler />
       <BackButtonGuard />
+      <ScrollToTop />
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 font-sans text-slate-900">
         <Routes>
           {!isSetup ? (
@@ -168,6 +176,7 @@ export default function App() {
                 element={
                   <ExpenseList
                     expenses={data.expenses}
+                    setup={data.setup}
                     onUndoDelete={undoDeleteExpense}
                     canUndoDelete={canUndoDelete}
                   />
@@ -175,6 +184,7 @@ export default function App() {
               />
               <Route path="/expense/:id" element={<ExpenseDetail expenses={data.expenses} onDelete={deleteExpense} setup={data.setup} />} />
               <Route path="/analytics" element={<Analytics data={data} />} />
+              <Route path="/settlement" element={<Settlement data={data} />} />
               <Route path="/members" element={<GroupMemberManager setup={data.setup} onUpdate={saveSetup} />} />
               <Route path="/categories" element={<CategoryManager setup={data.setup} onUpdate={saveSetup} />} />
               <Route path="/settings" element={<Settings onReset={resetTrip} data={data} onImport={restoreData} />} />

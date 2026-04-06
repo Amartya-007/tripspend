@@ -144,24 +144,6 @@ export function useTripData() {
     }
   }, [data]);
 
-  // Offline sync: Try to recover from storage failures gracefully
-  const saveDataWithFallback = async (newData: TripData) => {
-    setData(newData);
-    // Attempt to persist - will retry automatically on next change if it fails
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
-    } catch (storageError) {
-      // Storage full or unavailable - try removing receipts
-      console.warn('Storage full, attempting lighter save...');
-      try {
-        const lighterData = stripReceiptData(newData);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(lighterData));
-      } catch {
-        console.error('Critical storage error - data may be at risk', storageError);
-      }
-    }
-  };
-
   const saveSetup = (setup: TripSetup) => {
     setData(prev => ({
       ...prev,
