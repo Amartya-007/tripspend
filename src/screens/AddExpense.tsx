@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Expense, TripSetup, getTripCategories } from '../utils/calculations.ts';
+import { Expense, TripSetup, getTripCategories, getTripPeople } from '../utils/calculations.ts';
 import { categorizeExpenseWithAI, isAIConfigured } from '../utils/aiCategorization.ts';
-import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic } from 'lucide-react';
-import { motion } from 'motion/react';
+import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic, User, Users, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { DatePicker } from '../components/DatePicker.tsx';
+import { CustomSelect } from '../components/CustomSelect.tsx';
 import { format, isBefore, isValid, parseISO, startOfDay } from 'date-fns';
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
-import { recognize } from 'tesseract.js';
 
 interface AddExpenseProps {
   onAdd: (expense: Expense) => void;
@@ -166,6 +167,98 @@ type SpeechRecognitionCtor = new () => {
   start: () => void;
 };
 
+// Multi-select dropdown for split participants
+const SplitSelect: React.FC<{
+  people: string[];
+  selected: string[];
+  paidBy: string;
+  disabled: boolean;
+  onChange: (v: string[]) => void;
+}> = ({ people, selected, paidBy, disabled, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toggle = (person: string) => {
+    onChange(
+      selected.includes(person)
+        ? selected.length > 1 ? selected.filter(p => p !== person) : selected
+        : [...selected, person]
+    );
+  };
+
+  const label = selected.length === people.length
+    ? 'Everyone'
+    : selected.length === 1
+    ? selected[0]
+    : `${selected.length} people`;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
+          open ? 'ring-2 ring-inset ring-blue-500 border-blue-500 text-blue-700 bg-blue-50'
+               : 'border-slate-200 text-slate-700 hover:border-slate-300'
+        }`}
+      >
+        <span className="truncate">{label}</span>
+        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }} className="flex-shrink-0">
+          <ChevronDown className="w-4 h-4 text-slate-400" />
+        </motion.span>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            transition={{ duration: 0.13 }}
+            className="absolute z-50 top-full mt-1.5 left-0 right-0 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden"
+          >
+            {people.map((person, idx) => {
+              const isSelected = selected.includes(person);
+              return (
+                <React.Fragment key={person}>
+                  {idx > 0 && <div className="h-px bg-slate-50 mx-4" />}
+                  <button
+                    type="button"
+                    onClick={() => toggle(person)}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
+                  >
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                      isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300'
+                    }`}>
+                      {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                    </div>
+                    <span className={`text-sm font-semibold flex-1 text-left ${isSelected ? 'text-slate-900' : 'text-slate-400'}`}>
+                      {person}
+                    </span>
+                    {person === paidBy && (
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">paid</span>
+                    )}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 const applyVoiceTranscript = (
   transcript: string,
   setAmount: (value: string) => void,
@@ -196,15 +289,18 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const [searchParams] = useSearchParams();
   const isEditing = !!id;
 
+  const people = getTripPeople(setup);
+
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Expense['category']>('Food');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [paidBy, setPaidBy] = useState<string>(people[0] || 'Trip Wallet');
+  const [splitWith, setSplitWith] = useState<string[]>(people);
   const [tagsInput, setTagsInput] = useState('');
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [error, setError] = useState('');
-  const [aiCategorizing, setAiCategorizing] = useState(false);
 
   const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(date)), startOfDay(new Date()));
 
@@ -216,6 +312,8 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         setCategory(expense.category);
         setNote(expense.note || '');
         setDate(expense.date);
+        setPaidBy(expense.paidBy || people[0] || 'Trip Wallet');
+        setSplitWith(expense.participants && expense.participants.length > 0 ? expense.participants : people);
         setTagsInput((expense.tags || []).join(', '));
         const legacyReceipts = expense.receiptImage ? [{ image: expense.receiptImage, name: expense.receiptName }] : [];
         setReceipts((expense.receipts && expense.receipts.length > 0) ? expense.receipts : legacyReceipts);
@@ -248,17 +346,16 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     }
   }, [isEditing, searchParams]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const categories = useMemo(() => getTripCategories(setup), [setup]);
+  const quickAmounts = [50, 100, 200, 500];
+
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!amount || isNaN(parseFloat(amount)) || isLocked) return;
 
     const amountNum = parseFloat(amount);
-
-    const tags = tagsInput
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
+    const tags = tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean);
 
     const expenseData: Expense = {
       id: isEditing ? id : crypto.randomUUID(),
@@ -266,11 +363,13 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       category,
       note: note.trim(),
       date,
-      paidBy: 'Trip Wallet',
+      paidBy,
+      participants: splitWith.length > 0 ? splitWith : people,
       tags,
       receipts,
       receiptImage: receipts[0]?.image,
-      receiptName: receipts[0]?.name
+      receiptName: receipts[0]?.name,
+      ...(!isEditing && { createdAt: new Date().toISOString() }),
     };
 
     if (isEditing) {
@@ -279,30 +378,23 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       onAdd(expenseData);
     }
     navigate('/expenses');
-  };
+  }, [amount, isLocked, tagsInput, isEditing, id, category, note, date, paidBy, splitWith, people, receipts, onUpdate, onAdd, navigate]);
 
-  const categories = getTripCategories(setup);
-  const quickAmounts = [50, 100, 200, 500];
+  const handleQuickAmount = useCallback((val: number) => {
+    setAmount(prev => (parseFloat(prev) || 0) + val + '');
+  }, []);
 
-  const handleQuickAmount = (val: number) => {
-    const current = parseFloat(amount) || 0;
-    setAmount((current + val).toString());
-  };
-
-  const addReceiptFromDataUrl = async (dataUrl: string, fileName?: string) => {
+  const addReceiptFromDataUrl = useCallback(async (dataUrl: string, fileName?: string) => {
     const compressed = await compressReceipt(dataUrl);
-    const estimatedBytes = estimateBytesFromDataUrl(compressed);
-    if (estimatedBytes > MAX_RECEIPT_ESTIMATED_BYTES) {
+    if (estimateBytesFromDataUrl(compressed) > MAX_RECEIPT_ESTIMATED_BYTES) {
       throw new Error('Receipt is too large. Please use a smaller image.');
     }
-
     setReceipts((prev) => [...prev, { image: compressed, name: fileName }]);
-  };
+  }, []);
 
-  const handleReceiptUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReceiptUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-
     setError('');
     try {
       for (const file of Array.from(files)) {
@@ -310,119 +402,67 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         await addReceiptFromDataUrl(dataUrl, file.name);
       }
     } catch (uploadError) {
-      if (uploadError instanceof Error) {
-        setError(uploadError.message);
-      } else {
-        setError('Could not process that image. Try another receipt photo.');
-      }
+      setError(uploadError instanceof Error ? uploadError.message : 'Could not process that image. Try another receipt photo.');
     }
-
     event.target.value = '';
-  };
+  }, [addReceiptFromDataUrl]);
 
-  const handleCameraCapture = async () => {
+  const handleCameraCapture = useCallback(async () => {
     setError('');
     try {
-      const photo = await Camera.getPhoto({
-        quality: 80,
-        resultType: CameraResultType.DataUrl,
-        source: CameraSource.Camera,
-      });
-
-      if (!photo.dataUrl) {
-        setError('Could not capture image.');
-        return;
-      }
-
+      const photo = await Camera.getPhoto({ quality: 80, resultType: CameraResultType.DataUrl, source: CameraSource.Camera });
+      if (!photo.dataUrl) { setError('Could not capture image.'); return; }
       await addReceiptFromDataUrl(photo.dataUrl, `Camera_${Date.now()}.jpg`);
     } catch {
       setError('Camera capture cancelled or failed.');
     }
-  };
+  }, [addReceiptFromDataUrl]);
 
-  const handleExtractFromReceipt = async () => {
-    if (receipts.length === 0) {
-      setError('Attach at least one receipt first.');
-      return;
-    }
-
+  const handleExtractFromReceipt = useCallback(async () => {
+    if (receipts.length === 0) { setError('Attach at least one receipt first.'); return; }
     setError('');
     setOcrLoading(true);
     try {
+      // Lazy load tesseract — only pulled when actually needed (~300KB saved from initial bundle)
+      const { recognize } = await import('tesseract.js');
       const { data } = await recognize(receipts[0].image, 'eng');
       const extracted = extractReceiptFields(data.text || '');
 
-      if (extracted.amount && (!amount || parseFloat(amount) <= 0)) {
-        setAmount(extracted.amount.toString());
-      }
-
+      if (extracted.amount && (!amount || parseFloat(amount) <= 0)) setAmount(extracted.amount.toString());
       if (extracted.date) {
         const parsedDate = parseISO(extracted.date);
-        if (isValid(parsedDate)) {
-          setDate(format(parsedDate, 'yyyy-MM-dd'));
-        }
+        if (isValid(parsedDate)) setDate(format(parsedDate, 'yyyy-MM-dd'));
       }
+      if (extracted.vendor && !note.trim()) setNote(extracted.vendor);
 
-      if (extracted.vendor && !note.trim()) {
-        setNote(extracted.vendor);
-      }
-      // Try AI categorization
       if (data.text && isAIConfigured()) {
-        setAiCategorizing(true);
         try {
           const aiResult = await categorizeExpenseWithAI(data.text, categories, extracted.amount || undefined);
-          if (aiResult) {
-            setCategory(aiResult.category);
-          }
-        } catch {
-          // Silently fail - AI categorization is optional
-        } finally {
-          setAiCategorizing(false);
-        }
+          if (aiResult) setCategory(aiResult.category);
+        } catch { /* AI categorization is optional */ }
       }
     } catch {
       setError('OCR extraction failed. Try a clearer receipt image.');
     } finally {
       setOcrLoading(false);
     }
-  };
+  }, [receipts, amount, note, categories]);
 
-  const handleVoiceAdd = async () => {
+  const handleVoiceAdd = useCallback(async () => {
     setError('');
-
     if (Capacitor.isNativePlatform()) {
       try {
         const availability = await SpeechRecognition.available();
-        if (!availability.available) {
-          setError('Voice recognition is unavailable on this device.');
-          return;
-        }
-
+        if (!availability.available) { setError('Voice recognition is unavailable on this device.'); return; }
         const permissionState = await SpeechRecognition.checkPermissions();
         if (permissionState.speechRecognition !== 'granted') {
           const request = await SpeechRecognition.requestPermissions();
-          if (request.speechRecognition !== 'granted') {
-            setError('Microphone permission is required for voice add.');
-            return;
-          }
+          if (request.speechRecognition !== 'granted') { setError('Microphone permission is required for voice add.'); return; }
         }
-
-        const result = await SpeechRecognition.start({
-          language: 'en-IN',
-          maxResults: 1,
-          partialResults: false,
-          popup: true,
-          prompt: 'Speak your expense, for example: Spent 250 on food'
-        });
-
+        const result = await SpeechRecognition.start({ language: 'en-IN', maxResults: 1, partialResults: false, popup: true, prompt: 'Speak your expense, for example: Spent 250 on food' });
         const transcript = result.matches?.[0];
-        if (!transcript) {
-          setError('Could not hear clearly. Try again.');
-          return;
-        }
-
+        if (!transcript) { setError('Could not hear clearly. Try again.'); return; }
         applyVoiceTranscript(transcript, setAmount, setCategory, setNote);
-
         return;
       } catch {
         setError('Voice recognition failed. Please try again.');
@@ -434,28 +474,16 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       (window as unknown as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition
     );
-
-    if (!SpeechRecognitionImpl) {
-      setError('Voice input is not supported on this device.');
-      return;
-    }
+    if (!SpeechRecognitionImpl) { setError('Voice input is not supported on this device.'); return; }
 
     const recognition = new SpeechRecognitionImpl();
     recognition.lang = 'en-IN';
     recognition.continuous = false;
     recognition.interimResults = false;
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      applyVoiceTranscript(transcript, setAmount, setCategory, setNote);
-    };
-
-    recognition.onerror = () => {
-      setError('Voice recognition failed. Please try again.');
-    };
-
+    recognition.onresult = (event) => applyVoiceTranscript(event.results[0][0].transcript, setAmount, setCategory, setNote);
+    recognition.onerror = () => setError('Voice recognition failed. Please try again.');
     recognition.start();
-  };
+  }, []);
 
   return (
     <div className="page-shell">
@@ -503,7 +531,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
           <input
             type="number"
             required
-            autoFocus
+            autoFocus={!isEditing}
             disabled={isLocked}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -538,14 +566,43 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             <Calendar className="w-4 h-4 text-slate-400" />
             Date
           </label>
-          <input
-            type="date"
-            disabled={isLocked}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+          <DatePicker value={date} onChange={setDate} disabled={Boolean(isLocked)} />
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+            <User className="w-4 h-4 text-slate-400" />
+            Paid by
+          </label>
+          <CustomSelect
+            value={paidBy}
+            options={(people.length > 0 ? people : ['Trip Wallet']).map(p => ({ value: p, label: p }))}
+            onChange={setPaidBy}
+            disabled={Boolean(isLocked)}
+            accentColor="emerald"
           />
         </div>
+
+        {people.length > 1 && (
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+              <Users className="w-4 h-4 text-slate-400" />
+              Split between
+              <span className="ml-auto text-xs font-normal text-slate-400">{splitWith.length} of {people.length}</span>
+            </label>
+            <SplitSelect
+              people={people}
+              selected={splitWith}
+              paidBy={paidBy}
+              disabled={Boolean(isLocked)}
+              onChange={setSplitWith}
+            />
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={() => setSplitWith([...people])} className="text-xs text-blue-600 font-semibold px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors">Select all</button>
+              <button type="button" onClick={() => setSplitWith(paidBy ? [paidBy] : [people[0]])} className="text-xs text-slate-500 font-semibold px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors">Only payer</button>
+            </div>
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">

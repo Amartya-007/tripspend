@@ -1,20 +1,41 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Expense } from '../utils/calculations.ts';
+import { Expense, TripSetup, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
-import { Utensils, Plane, Home, Package, Calendar, Filter, X, Search, Tag, Image as ImageIcon } from 'lucide-react';
+import { Utensils, Plane, Home, Package, Calendar, Filter, X, Search, Tag, Image as ImageIcon, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
 
+import { CustomSelect } from '../components/CustomSelect.tsx';
+import { DatePicker } from '../components/DatePicker.tsx';
+
+// Lookup maps — defined once outside component, O(1) access
+const CATEGORY_ICON: Record<string, React.ReactElement> = {
+  Food: <Utensils className="w-5 h-5 text-orange-500" />,
+  Travel: <Plane className="w-5 h-5 text-blue-500" />,
+  Stay: <Home className="w-5 h-5 text-purple-500" />,
+};
+const DEFAULT_ICON = <Package className="w-5 h-5 text-slate-500" />;
+
+const CATEGORY_BG: Record<string, string> = {
+  Food: 'bg-orange-50',
+  Travel: 'bg-blue-50',
+  Stay: 'bg-purple-50',
+};
+const DEFAULT_BG = 'bg-slate-50';
+
 interface ExpenseListProps {
   expenses: Expense[];
+  setup: TripSetup | null;
   onUndoDelete: () => void;
   canUndoDelete: boolean;
 }
 
-export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete, canUndoDelete }) => {
+export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUndoDelete, canUndoDelete }) => {
   const navigate = useNavigate();
-  const [categoryFilter, setCategoryFilter] = useState<Expense['category'] | 'All'>('All');
+  const people = getTripPeople(setup);
+  const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [personFilter, setPersonFilter] = useState<string>('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -24,7 +45,10 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
   const filteredExpenses = useMemo(() => {
     const base = expenses.filter(expense => {
       const matchesCategory = categoryFilter === 'All' || expense.category === categoryFilter;
-      
+      const matchesPerson = personFilter === 'All' ||
+        expense.paidBy === personFilter ||
+        (expense.participants || []).includes(personFilter);
+
       let matchesDate = true;
       if (startDate || endDate) {
         const expenseDate = parseISO(expense.date);
@@ -37,12 +61,13 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
       const searchable = [
         expense.note || '',
         expense.category,
+        expense.paidBy || '',
         (expense.tags || []).join(' '),
         expense.amount.toString()
       ].join(' ').toLowerCase();
       const matchesSearch = query.length === 0 || searchable.includes(query);
 
-      return matchesCategory && matchesDate && matchesSearch;
+      return matchesCategory && matchesPerson && matchesDate && matchesSearch;
     });
 
     return base.sort((a, b) => {
@@ -56,34 +81,20 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
     });
   }, [expenses, categoryFilter, startDate, endDate, searchQuery, sortBy]);
 
-  const getIcon = (category: Expense['category']) => {
-    switch (category) {
-      case 'Food': return <Utensils className="w-5 h-5 text-orange-500" />;
-      case 'Travel': return <Plane className="w-5 h-5 text-blue-500" />;
-      case 'Stay': return <Home className="w-5 h-5 text-purple-500" />;
-      case 'Misc': return <Package className="w-5 h-5 text-slate-500" />;
-    }
-  };
-
-  const getBg = (category: Expense['category']) => {
-    switch (category) {
-      case 'Food': return 'bg-orange-50';
-      case 'Travel': return 'bg-blue-50';
-      case 'Stay': return 'bg-purple-50';
-      case 'Misc': return 'bg-slate-50';
-    }
-  };
-
-  const categories: (Expense['category'] | 'All')[] = ['All', 'Food', 'Travel', 'Stay', 'Misc'];
+  const uniqueCategories = useMemo(
+    () => ['All', ...Array.from(new Set(expenses.map(e => e.category)))],
+    [expenses]
+  );
 
   const clearFilters = () => {
     setCategoryFilter('All');
+    setPersonFilter('All');
     setStartDate('');
     setEndDate('');
     setSearchQuery('');
   };
 
-  const isFiltered = categoryFilter !== 'All' || startDate !== '' || endDate !== '' || searchQuery.trim() !== '';
+  const isFiltered = categoryFilter !== 'All' || personFilter !== 'All' || startDate !== '' || endDate !== '' || searchQuery.trim() !== '';
 
   return (
     <div className="page-shell">
@@ -112,15 +123,15 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
       </div>
 
       <div className="mb-5">
-        <select
+        <CustomSelect
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest' | 'highest')}
-          className="input-field font-medium text-slate-700 cursor-pointer"
-        >
-          <option value="newest">↓ Sort: Newest First</option>
-          <option value="oldest">↑ Sort: Oldest First</option>
-          <option value="highest">⬇ Sort: Highest Amount</option>
-        </select>
+          options={[
+            { value: 'newest', label: '↓ Newest First' },
+            { value: 'oldest', label: '↑ Oldest First' },
+            { value: 'highest', label: '↓ Highest Amount' },
+          ]}
+          onChange={(v) => setSortBy(v as 'newest' | 'oldest' | 'highest')}
+        />
       </div>
 
       <AnimatePresence>
@@ -135,7 +146,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Category</label>
                 <div className="flex flex-wrap gap-2.5">
-                  {categories.map(cat => (
+                  {uniqueCategories.map(cat => (
                     <button
                       key={cat}
                       onClick={() => setCategoryFilter(cat)}
@@ -151,25 +162,53 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
                 </div>
               </div>
 
+              {people.length > 0 && (
+                <>
+                  <div className="h-px bg-slate-200" />
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block flex items-center gap-1">
+                      <User className="w-3 h-3" /> Person
+                    </label>
+                    <div className="flex flex-wrap gap-2.5">
+                      {['All', ...people].map(person => (
+                        <button
+                          key={person}
+                          onClick={() => setPersonFilter(person)}
+                          className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all ${
+                            personFilter === person
+                              ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white shadow-md'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          {person}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className="h-px bg-slate-200" />
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">From</label>
-                  <input 
-                    type="date" 
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="input-field text-sm"
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">From</label>
+                    {startDate && <button type="button" onClick={() => setStartDate('')} className="text-[10px] text-red-400 font-semibold">Clear</button>}
+                  </div>
+                  <DatePicker
+                    value={startDate || format(new Date(), 'yyyy-MM-dd')}
+                    onChange={setStartDate}
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">To</label>
-                  <input 
-                    type="date" 
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="input-field text-sm"
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">To</label>
+                    {endDate && <button type="button" onClick={() => setEndDate('')} className="text-[10px] text-red-400 font-semibold">Clear</button>}
+                  </div>
+                  <DatePicker
+                    value={endDate || format(new Date(), 'yyyy-MM-dd')}
+                    onChange={setEndDate}
                   />
                 </div>
               </div>
@@ -190,11 +229,31 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
 
       {filteredExpenses.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-slate-500">
-          <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-4 mb-6">
+          <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
             <Package className="w-12 h-12 text-slate-300" />
           </div>
-          <p className="font-semibold text-lg text-slate-700">No expenses yet</p>
-          <p className="text-sm mt-2">Add your first transaction to get started</p>
+          <p className="font-semibold text-lg text-slate-700">
+            {isFiltered ? 'No matching expenses' : 'No expenses yet'}
+          </p>
+          <p className="text-sm mt-1 text-slate-400">
+            {isFiltered ? 'Try adjusting your filters' : 'Start tracking your trip spending'}
+          </p>
+          {!isFiltered && (
+            <button
+              onClick={() => navigate('/add')}
+              className="mt-5 px-6 py-3 bg-blue-600 text-white text-sm font-bold rounded-2xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
+            >
+              Add first expense →
+            </button>
+          )}
+          {isFiltered && (
+            <button
+              onClick={clearFilters}
+              className="mt-5 px-5 py-2.5 bg-slate-100 text-slate-600 text-sm font-bold rounded-2xl hover:bg-slate-200 transition-colors"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -209,8 +268,8 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
                 className="card-elevated p-5 flex items-center gap-4 cursor-pointer hover:shadow-lg hover:border-blue-200 hover:scale-105 transition-all duration-200"
                 onClick={() => navigate(`/expense/${expense.id}`)}
               >
-                <div className={`w-12 h-12 ${getBg(expense.category)} rounded-2xl flex items-center justify-center flex-shrink-0 font-bold`}>
-                  {getIcon(expense.category)}
+                <div className={`w-12 h-12 ${CATEGORY_BG[expense.category] ?? DEFAULT_BG} rounded-2xl flex items-center justify-center flex-shrink-0 font-bold`}>
+                  {CATEGORY_ICON[expense.category] ?? DEFAULT_ICON}
                 </div>
                 
                 <div className="flex-grow min-w-0">
@@ -222,9 +281,15 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUndoDelete
                       {formatCurrency(expense.amount)}
                     </span>
                   </div>
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1.5">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1.5">
                     <Calendar className="w-3 h-3" />
                     {format(new Date(expense.date), 'MMM dd, yyyy')}
+                    {expense.paidBy && expense.paidBy !== 'Trip Wallet' && (
+                      <span className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px]">
+                        <User className="w-2.5 h-2.5" />
+                        {expense.paidBy}
+                      </span>
+                    )}
                   </div>
                     {((expense.tags && expense.tags.length > 0) || (expense.receipts && expense.receipts.length > 0) || expense.receiptImage) && (
                       <div className="flex items-center gap-2 mt-2.5 flex-wrap">

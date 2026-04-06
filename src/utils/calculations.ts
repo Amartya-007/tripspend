@@ -8,6 +8,7 @@ export interface TripSetup {
   endDate: string;
   lockPreviousDays: boolean;
   participants?: string[];
+  participantUpiIds?: Record<string, string>;
   customCategories?: string[];
 }
 
@@ -30,6 +31,7 @@ export interface Expense {
   receiptName?: string;
   ocrText?: string;
   isAiCategorized?: boolean;
+  createdAt?: string; // ISO timestamp — set on creation, not on edit
 }
 
 export interface TripData {
@@ -163,18 +165,20 @@ export const calculateStats = (tripData: TripData) => {
   const { setup, expenses } = tripData;
   if (!setup) return null;
 
-  const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  // Single pass — compute total, today, yesterday simultaneously
+  let totalSpent = 0;
+  let todaySpent = 0;
+  let yesterdaySpent = 0;
+
+  for (const exp of expenses) {
+    totalSpent += exp.amount;
+    if (isToday(parseISO(exp.date))) todaySpent += exp.amount;
+    else if (isYesterday(parseISO(exp.date))) yesterdaySpent += exp.amount;
+  }
+
   const remainingBalance = setup.totalBudget - totalSpent;
   const perPersonSpend = setup.peopleCount > 0 ? totalSpent / setup.peopleCount : 0;
   const remainingPercentage = (remainingBalance / setup.totalBudget) * 100;
-
-  const todaySpent = expenses
-    .filter((e) => isToday(parseISO(e.date)))
-    .reduce((sum, e) => sum + e.amount, 0);
-
-  const yesterdaySpent = expenses
-    .filter((e) => isYesterday(parseISO(e.date)))
-    .reduce((sum, e) => sum + e.amount, 0);
 
   const tripStart = parseISO(setup.startDate);
   const tripEnd = parseISO(setup.endDate);
