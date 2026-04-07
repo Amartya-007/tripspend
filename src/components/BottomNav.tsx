@@ -45,12 +45,6 @@ const NavItem = ({ to, icon, label }: { to: string; icon: React.ReactNode; label
   >
     {({ isActive }) => (
       <>
-        {isActive && (
-          <motion.div
-            layoutId="activeIndicator"
-            className="absolute top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-blue-600 rounded-full"
-          />
-        )}
         {icon}
         <span className="text-[9px] font-bold uppercase tracking-wide leading-tight text-center">{label}</span>
       </>

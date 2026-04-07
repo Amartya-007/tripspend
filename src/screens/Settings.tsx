@@ -1,17 +1,24 @@
 import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RotateCcw, Edit3, ChevronRight, Info, Download, Upload, Share2, Users, Tag } from 'lucide-react';
+import { RotateCcw, Edit3, ChevronRight, Download, Upload, Share2, Users, Tag, FileText, History, CloudUpload, CloudDownload, LogIn, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Directory, Filesystem } from '@capacitor/filesystem';
-import { Expense, TripData, TripSetup } from '../utils/calculations.ts';
+import { Expense, TripData, TripSetup, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 
 interface SettingsProps {
   onReset: () => void;
   data: TripData;
   onImport: (setup: TripSetup, expenses: Expense[]) => void;
+  firebaseConfigured: boolean;
+  authLoading: boolean;
+  userEmail: string | null;
+  onSignInGoogle: () => void;
+  onSignOutGoogle: () => void;
+  onCloudBackup: () => void;
+  onCloudRestore: () => void;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -26,7 +33,18 @@ const blobToBase64 = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
-export const Settings: React.FC<SettingsProps> = ({ onReset, data, onImport }) => {
+export const Settings: React.FC<SettingsProps> = ({
+  onReset,
+  data,
+  onImport,
+  firebaseConfigured,
+  authLoading,
+  userEmail,
+  onSignInGoogle,
+  onSignOutGoogle,
+  onCloudBackup,
+  onCloudRestore,
+}) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -123,6 +141,148 @@ export const Settings: React.FC<SettingsProps> = ({ onReset, data, onImport }) =
     a.click();
   };
 
+  // PDF-safe currency formatter — jsPDF helvetica doesn't support ₹
+  const pdfCurrency = (amount: number) =>
+    'Rs. ' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(amount);
+
+  const handleExportClosingReport = async () => {
+    if (!data.setup) { alert('Set up a trip first to generate a report.'); return; }
+    try {
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+      const W = doc.internal.pageSize.getWidth();
+      const H = doc.internal.pageSize.getHeight();
+      const MX = 48;
+      const CW = W - MX * 2;
+      let y = 0;
+
+      const t = {
+        label: (s: string, x = MX) => { doc.setFont('helvetica','bold');   doc.setFontSize(9);  doc.setTextColor(100,116,139); doc.text(s.toUpperCase(),x,y); y+=14; },
+        body:  (s: string, x = MX) => { doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(30,41,59);    doc.text(s,x,y); },
+        right: (s: string)         => { doc.setFont('helvetica','bold');   doc.setFontSize(11); doc.setTextColor(15,23,42);    doc.text(s,MX+CW,y,{align:'right'}); },
+        gap:   (n = 16)            => { y += n; },
+      };
+
+      const newPage = (need = 60) => { if (y + need > H - 48) { doc.addPage(); y = 48; } };
+
+      const settlement = calculateSettlement(data.setup, data.expenses);
+      const people = getTripPeople(data.setup);
+      const budget = data.setup.totalBudget || 0;
+      const spent = data.expenses.reduce((s, e) => s + e.amount, 0);
+      const remaining = budget - spent;
+
+      const catTotals = new Map<string, number>();
+      for (const e of data.expenses) catTotals.set(e.category, (catTotals.get(e.category) ?? 0) + e.amount);
+      const catRows = Array.from(catTotals.entries()).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+
+      const paidTotals = new Map<string, number>();
+      for (const p of people) paidTotals.set(p, 0);
+      for (const e of data.expenses) paidTotals.set(e.paidBy, (paidTotals.get(e.paidBy) ?? 0) + e.amount);
+      const paidRows = Array.from(paidTotals.entries()).map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount);
+
+      // Header banner
+      y = 48;
+      doc.setFillColor(37,99,235);
+      doc.roundedRect(MX, y, CW, 80, 10, 10, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.setTextColor(255,255,255);
+      doc.text('Trip Closing Report', MX+20, y+30);
+      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(191,219,254);
+      doc.text(`${data.setup.startDate}  to  ${data.setup.endDate}`, MX+20, y+50);
+      doc.text(`${people.length} participants  |  ${data.expenses.length} expenses  |  Generated ${new Date().toLocaleDateString('en-IN')}`, MX+20, y+66);
+      y += 96;
+
+      // Summary cards
+      const colW = CW / 3;
+      const summaryItems = [
+        { label: 'Total Budget', value: pdfCurrency(budget) },
+        { label: 'Total Spent',  value: pdfCurrency(spent) },
+        { label: 'Remaining',    value: pdfCurrency(remaining) },
+      ];
+      summaryItems.forEach(({ label, value }, i) => {
+        const cx = MX + i * colW;
+        doc.setFillColor(248,250,252);
+        doc.roundedRect(cx, y, colW - 8, 52, 8, 8, 'F');
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(100,116,139);
+        doc.text(label.toUpperCase(), cx+12, y+16);
+        doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(15,23,42);
+        doc.text(value, cx+12, y+36);
+      });
+      y += 68;
+
+      // Category breakdown
+      newPage(catRows.length * 26 + 40);
+      t.label('Category Breakdown'); t.gap(4);
+      if (catRows.length === 0) {
+        t.body('No expenses recorded.'); t.gap(16);
+      } else {
+        const totalForPct = catRows.reduce((s, r) => s + r.amount, 0) || 1;
+        for (const row of catRows) {
+          newPage(22);
+          const pct = ((row.amount / totalForPct) * 100).toFixed(1) + '%';
+          t.body(row.name);
+          // percentage in muted
+          doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(100,116,139);
+          doc.text(pct, MX + CW - 80, y, { align: 'right' });
+          t.right(pdfCurrency(row.amount));
+          t.gap(20);
+        }
+      }
+      t.gap(8);
+
+      // Who paid
+      newPage(paidRows.length * 26 + 40);
+      t.label('Who Paid'); t.gap(4);
+      for (const row of paidRows) {
+        newPage(22);
+        t.body(row.name); t.right(pdfCurrency(row.amount)); t.gap(18);
+      }
+      t.gap(8);
+
+      // Settlements
+      newPage(settlement.transfers.length * 26 + 40);
+      t.label('Settlements'); t.gap(4);
+      if (settlement.transfers.length === 0) {
+        doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(22,163,74);
+        doc.text('Everyone is settled up - no transfers needed.', MX, y); t.gap(18);
+      } else {
+        for (const tr of settlement.transfers) {
+          newPage(22);
+          t.body(`${tr.from} pays ${tr.to}`); t.right(pdfCurrency(tr.amount)); t.gap(18);
+        }
+      }
+
+      // Footer on every page
+      const pages = doc.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(226,232,240);
+        doc.line(MX, H-36, MX+CW, H-36);
+        doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(148,163,184);
+        doc.text('Generated by TripSpend', MX, H-22);
+        doc.text(`Page ${i} of ${pages}`, MX+CW, H-22, { align: 'right' });
+      }
+
+      const blob = doc.output('blob');
+      const date = new Date().toISOString().split('T')[0];
+      const fileName = `tripspend_report_${date}.pdf`;
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const b64 = await blobToBase64(blob);
+          const result = await Filesystem.writeFile({ path: fileName, data: b64, directory: Directory.Cache });
+          await Share.share({ title: 'Trip Closing Report', files: [result.uri], dialogTitle: 'Share report' });
+          return;
+        } catch { /* fall through */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Could not generate PDF report.');
+    }
+  };
+
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -162,6 +322,13 @@ export const Settings: React.FC<SettingsProps> = ({ onReset, data, onImport }) =
           onClick={() => navigate('/categories')} />
       </Section>
 
+      {/* Logs */}
+      <Section label="Logs">
+        <SettingItem icon={<History className="w-4.5 h-4.5 text-violet-600" />} iconBg="bg-violet-50"
+          label="Full Settlement Log" description="View complete settle/reopen audit trail"
+          onClick={() => navigate('/settlement-log')} />
+      </Section>
+
       {/* Share */}
       <Section label="Share">
         <SettingItem icon={<Share2 className="w-4.5 h-4.5 text-emerald-600" />} iconBg="bg-emerald-50"
@@ -171,6 +338,47 @@ export const Settings: React.FC<SettingsProps> = ({ onReset, data, onImport }) =
         <SettingItem icon={<Share2 className="w-4.5 h-4.5 text-indigo-600" />} iconBg="bg-indigo-50"
           label="Share Summary Image" description="Generate a shareable summary card"
           onClick={() => { void handleShareImage(); }} />
+        <Divider />
+        <SettingItem icon={<FileText className="w-4.5 h-4.5 text-cyan-700" />} iconBg="bg-cyan-50"
+          label="Trip Closing Report (PDF)" description="Totals, categories, payers, and settlements"
+          onClick={() => { void handleExportClosingReport(); }} />
+      </Section>
+
+      {/* Cloud */}
+      <Section label="Cloud Sync (Firebase)">
+        {!firebaseConfigured && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            Firebase is not configured yet. Add VITE_FIREBASE_* values to your env file.
+          </div>
+        )}
+
+        {firebaseConfigured && (
+          <>
+            <SettingItem
+              icon={userEmail ? <LogOut className="w-4.5 h-4.5 text-slate-700" /> : <LogIn className="w-4.5 h-4.5 text-blue-600" />}
+              iconBg={userEmail ? 'bg-slate-100' : 'bg-blue-50'}
+              label={authLoading ? 'Checking sign-in...' : userEmail ? 'Signed in with Google' : 'Sign in with Google'}
+              description={authLoading ? 'Please wait' : userEmail || 'Required for cloud backup and restore'}
+              onClick={userEmail ? onSignOutGoogle : onSignInGoogle}
+            />
+            <Divider />
+            <SettingItem
+              icon={<CloudUpload className="w-4.5 h-4.5 text-emerald-600" />}
+              iconBg="bg-emerald-50"
+              label="Backup to Cloud"
+              description="Save setup + expenses to Firestore"
+              onClick={onCloudBackup}
+            />
+            <Divider />
+            <SettingItem
+              icon={<CloudDownload className="w-4.5 h-4.5 text-indigo-600" />}
+              iconBg="bg-indigo-50"
+              label="Restore from Cloud"
+              description="Load latest backup from Firestore"
+              onClick={onCloudRestore}
+            />
+          </>
+        )}
       </Section>
 
       {/* Data */}
@@ -196,7 +404,7 @@ export const Settings: React.FC<SettingsProps> = ({ onReset, data, onImport }) =
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 text-center space-y-1">
         <p className="font-black text-slate-900 text-lg">TripSpend</p>
         <p className="text-xs text-slate-400">Made by Amartya Vishwakarma</p>
-        <p className="text-xs text-slate-300 font-bold uppercase tracking-widest pt-2">v1.0.0</p>
+        <p className="text-xs text-slate-300 font-bold uppercase tracking-widest pt-2">v2.0.0</p>
       </div>
     </div>
   );

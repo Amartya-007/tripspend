@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Expense, TripSetup, getTripCategories, getTripPeople } from '../utils/calculations.ts';
 import { categorizeExpenseWithAI, isAIConfigured } from '../utils/aiCategorization.ts';
+import { formatCurrency } from '../utils/cn';
 import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic, User, Users, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DatePicker } from '../components/DatePicker.tsx';
@@ -259,6 +260,37 @@ const SplitSelect: React.FC<{
   );
 };
 
+// ── Smart category suggestions from note keywords ─────────────────
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  Travel: ['petrol', 'fuel', 'cab', 'uber', 'ola', 'auto', 'bus', 'train', 'flight', 'taxi', 'transport', 'toll', 'parking', 'metro'],
+  Stay:   ['hotel', 'stay', 'room', 'hostel', 'airbnb', 'lodge', 'resort', 'accommodation', 'rent'],
+  Food:   ['food', 'lunch', 'dinner', 'breakfast', 'snack', 'restaurant', 'cafe', 'coffee', 'tea', 'meal', 'eat', 'drink', 'biryani', 'pizza'],
+};
+
+const suggestCategory = (noteText: string, availableCategories: string[]): string | null => {
+  const lower = noteText.toLowerCase();
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (availableCategories.includes(cat) && keywords.some(kw => lower.includes(kw))) {
+      return cat;
+    }
+  }
+  return null;
+};
+
+// ── Duplicate detection ────────────────────────────────────────────
+const DUPLICATE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+
+const findDuplicate = (expenses: Expense[], amount: number, paidBy: string, date: string, excludeId?: string): Expense | null => {
+  const targetTime = new Date(date + 'T12:00:00').getTime();
+  return expenses.find(e => {
+    if (e.id === excludeId) return false;
+    if (e.paidBy !== paidBy) return false;
+    if (Math.abs(e.amount - amount) > 0.01) return false;
+    const eTime = e.createdAt ? new Date(e.createdAt).getTime() : new Date(e.date + 'T12:00:00').getTime();
+    return Math.abs(eTime - targetTime) < DUPLICATE_WINDOW_MS;
+  }) ?? null;
+};
+
 const applyVoiceTranscript = (
   transcript: string,
   setAmount: (value: string) => void,
@@ -301,6 +333,9 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState<Expense | null>(null);
+  const [showLargeExpenseConfirm, setShowLargeExpenseConfirm] = useState(false);
+  const [pendingExpense, setPendingExpense] = useState<Expense | null>(null);
 
   const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(date)), startOfDay(new Date()));
 
@@ -348,6 +383,16 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
 
   const categories = useMemo(() => getTripCategories(setup), [setup]);
   const quickAmounts = [50, 100, 200, 500];
+  const dailyLimit = setup ? (setup.totalBudget / Math.max(1, setup.peopleCount)) : 0;
+
+  // Smart category suggestion when note changes
+  const handleNoteChange = useCallback((value: string) => {
+    setNote(value);
+    if (!isEditing) {
+      const suggested = suggestCategory(value, categories);
+      if (suggested) setCategory(suggested);
+    }
+  }, [categories, isEditing]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -372,13 +417,39 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       ...(!isEditing && { createdAt: new Date().toISOString() }),
     };
 
+    if (!isEditing) {
+      // Duplicate check
+      const dup = findDuplicate(expenses, amountNum, paidBy, date, id);
+      if (dup) {
+        setPendingExpense(expenseData);
+        setShowDuplicateWarning(dup);
+        return;
+      }
+      // Large expense check (> daily budget per person)
+      if (dailyLimit > 0 && amountNum > dailyLimit) {
+        setPendingExpense(expenseData);
+        setShowLargeExpenseConfirm(true);
+        return;
+      }
+    }
+
     if (isEditing) {
       onUpdate(expenseData);
     } else {
       onAdd(expenseData);
     }
     navigate('/expenses');
-  }, [amount, isLocked, tagsInput, isEditing, id, category, note, date, paidBy, splitWith, people, receipts, onUpdate, onAdd, navigate]);
+  }, [amount, isLocked, tagsInput, isEditing, id, category, note, date, paidBy, splitWith, people, receipts, onUpdate, onAdd, navigate, expenses, dailyLimit]);
+
+  const commitExpense = useCallback(() => {
+    if (!pendingExpense) return;
+    if (isEditing) onUpdate(pendingExpense);
+    else onAdd(pendingExpense);
+    setPendingExpense(null);
+    setShowDuplicateWarning(null);
+    setShowLargeExpenseConfirm(false);
+    navigate('/expenses');
+  }, [pendingExpense, isEditing, onUpdate, onAdd, navigate]);
 
   const handleQuickAmount = useCallback((val: number) => {
     setAmount(prev => (parseFloat(prev) || 0) + val + '');
@@ -637,7 +708,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             type="text"
             disabled={isLocked}
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => handleNoteChange(e.target.value)}
             placeholder="What was this for?"
             className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
@@ -728,6 +799,91 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
           {isEditing ? 'Update Expense' : 'Save Expense'}
         </button>
       </motion.form>
+
+      {/* Duplicate warning bottom sheet */}
+      <AnimatePresence>
+        {showDuplicateWarning && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-[70]" onClick={() => setShowDuplicateWarning(null)} />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-[80] bg-white rounded-t-3xl p-6 shadow-2xl max-w-md mx-auto"
+              style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+            >
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 bg-slate-200 rounded-full" />
+              </div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-amber-50 rounded-2xl flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="font-black text-slate-900">Possible Duplicate</p>
+                  <p className="text-xs text-slate-500 mt-0.5">A similar expense was added recently</p>
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-3 mb-5 text-sm text-slate-600">
+                <span className="font-semibold">{formatCurrency(showDuplicateWarning.amount)}</span>
+                {' · '}{showDuplicateWarning.category}
+                {showDuplicateWarning.note && ` · ${showDuplicateWarning.note}`}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setShowDuplicateWarning(null)}
+                  className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm">
+                  Cancel
+                </button>
+                <button onClick={commitExpense}
+                  className="py-3 rounded-2xl bg-blue-600 text-white font-bold text-sm">
+                  Add Anyway
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Large expense confirmation */}
+      <AnimatePresence>
+        {showLargeExpenseConfirm && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-[70]" onClick={() => setShowLargeExpenseConfirm(false)} />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-[80] bg-white rounded-t-3xl p-6 shadow-2xl max-w-md mx-auto"
+              style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+            >
+              <div className="flex justify-center mb-3">
+                <div className="w-10 h-1 bg-slate-200 rounded-full" />
+              </div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-red-50 rounded-2xl flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-red-500" />
+                </div>
+                <div>
+                  <p className="font-black text-slate-900">Large Expense</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {formatCurrency(parseFloat(amount))} exceeds your daily limit of {formatCurrency(dailyLimit)}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setShowLargeExpenseConfirm(false)}
+                  className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm">
+                  Cancel
+                </button>
+                <button onClick={commitExpense}
+                  className="py-3 rounded-2xl bg-red-600 text-white font-bold text-sm">
+                  Add Anyway
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

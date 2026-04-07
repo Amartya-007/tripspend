@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/cn';
 import { Settings, Zap, Calendar, Clock, AlertTriangle, BarChart3, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
+import { differenceInDays, parseISO, startOfDay } from 'date-fns';
 
 interface DashboardProps {
   data: TripData;
@@ -11,8 +12,47 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const stats = useMemo(() => calculateStats(data), [data]);
+  const daysUntilStart = useMemo(() => {
+    if (!data.setup?.startDate) return 0;
+    const today = startOfDay(new Date());
+    const start = startOfDay(parseISO(data.setup.startDate));
+    return differenceInDays(start, today);
+  }, [data.setup?.startDate]);
+  const isPreTrip = daysUntilStart > 0;
 
   if (!stats || !data.setup) return null;
+
+  if (data.expenses.length === 0) {
+    return (
+      <div className="page-shell space-y-5">
+        <div className="flex justify-between items-center page-header">
+          <div>
+            <h1 className="page-title">TripSpend</h1>
+            <p className="page-subtitle">Budget Dashboard</p>
+          </div>
+          <Link to="/settings" className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 text-slate-600 hover:shadow-lg hover:text-blue-600 transition-all duration-200">
+            <Settings className="w-5 h-5" />
+          </Link>
+        </div>
+
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 text-center">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl mx-auto flex items-center justify-center mb-4">
+            <BarChart3 className="w-8 h-8 text-blue-500" />
+          </div>
+          <p className="font-black text-slate-900 text-lg">No expenses yet</p>
+          <p className="text-sm text-slate-500 mt-2">Start with your first expense to unlock burn rate, alerts, and analytics.</p>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <Link to="/add" className="py-3 rounded-2xl bg-blue-600 text-white text-sm font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors">
+              Add Expense
+            </Link>
+            <Link to="/setup" className="py-3 rounded-2xl bg-slate-100 text-slate-700 text-sm font-bold hover:bg-slate-200 transition-colors">
+              Edit Setup
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (!stats.isOverspending) return;
@@ -45,6 +85,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
         className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-3xl p-5 text-white shadow-xl shadow-blue-200">
         <p className="text-blue-200 text-xs font-bold uppercase tracking-widest mb-3">Current Trip</p>
+        {isPreTrip && (
+          <div className="mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/15 border border-white/20">
+            <Calendar className="w-3.5 h-3.5 text-blue-100" />
+            <span className="text-[11px] font-bold text-blue-50">
+              Trip starts in {daysUntilStart} day{daysUntilStart > 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div><p className="text-blue-200 text-xs">Budget</p><p className="font-black text-xl">{formatCurrency(data.setup.totalBudget)}</p></div>
           <div><p className="text-blue-200 text-xs">Spent</p><p className="font-black text-xl">{formatCurrency(stats.totalSpent)}</p></div>

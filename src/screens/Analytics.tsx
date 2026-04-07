@@ -1,9 +1,11 @@
 import React, { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { TripData, getTripCategories, getTripPeople, calculateStats, calculateSettlement } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 import { motion } from 'motion/react';
 import { TrendingUp, PieChart, BarChart3, Users, AlertTriangle, Zap, Crown, Trophy, Receipt } from 'lucide-react';
 import { differenceInDays, parseISO } from 'date-fns';
+import { loadSettledTransfers, isSettled, pruneStale } from '../utils/settlements.ts';
 
 const dateFmt = new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' });
 
@@ -23,6 +25,21 @@ export const Analytics: React.FC<Props> = ({ data }) => {
   const stats = useMemo(() => calculateStats(data), [data]);
   const people = useMemo(() => getTripPeople(data.setup), [data.setup]);
   const settlement = useMemo(() => calculateSettlement(data.setup, data.expenses), [data.setup, data.expenses]);
+
+  // Read settled transfers using structured storage, prune stale entries
+  const settledTransfers = useMemo(() => {
+    const loaded = loadSettledTransfers();
+    return pruneStale(loaded, settlement.transfers);
+  }, [settlement.transfers]);
+
+  const pendingSettlement = useMemo(() => {
+    const pending = settlement.transfers.filter(t => !isSettled(settledTransfers, t.from, t.to, t.amount));
+    return {
+      ...settlement,
+      transfers: pending,
+      totalToSettle: pending.reduce((s, t) => s + t.amount, 0),
+    };
+  }, [settlement, settledTransfers]);
 
   const personStats = useMemo(() => {
     if (!people.length) return [];
@@ -86,7 +103,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     if (stats.budgetLastsDays !== Infinity && stats.daysRemaining > 0 && stats.budgetLastsDays < stats.daysRemaining) {
       lines.push(`Budget runs out ${Math.floor(stats.budgetLastsDays)} days before trip ends`);
     }
-    if (settlement.totalToSettle > 0) lines.push(`${formatCurrency(settlement.totalToSettle)} still needs to be settled`);
+    if (settlement.totalToSettle > 0) lines.push(`${formatCurrency(pendingSettlement.totalToSettle)} still needs to be settled`);
     return lines.slice(0, 4);
   }, [stats, topSpender, categoryBreakdown, settlement, data.expenses]);
 
@@ -98,8 +115,8 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     if (usedPct > expectedPct + 20) score -= 25;
     else if (usedPct > expectedPct + 10) score -= 10;
     if (stats.isOverspending) score -= 20;
-    if (settlement.totalToSettle > stats.totalSpent * 0.3) score -= 15;
-    else if (settlement.totalToSettle > 0) score -= 5;
+    if (pendingSettlement.totalToSettle > stats.totalSpent * 0.3) score -= 15;
+    else if (pendingSettlement.totalToSettle > 0) score -= 5;
     if (dailyTimeline.length > 1 && stats.totalSpent > 0) {
       const avg = stats.totalSpent / dailyTimeline.length;
       const variance = dailyTimeline.reduce((s, d) => s + (d.amount - avg) ** 2, 0) / dailyTimeline.length;
@@ -117,6 +134,30 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     return (
       <div className="page-shell flex items-center justify-center py-24">
         <p className="text-slate-400 font-semibold">Add expenses to see analytics</p>
+      </div>
+    );
+  }
+
+  if (data.expenses.length === 0) {
+    return (
+      <div className="page-shell space-y-4">
+        <div className="page-header">
+          <h1 className="page-title">Analytics</h1>
+          <p className="page-subtitle">Trip insights & breakdown</p>
+        </div>
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+            <TrendingUp className="w-8 h-8 text-blue-500" />
+          </div>
+          <p className="font-black text-slate-900 text-lg">Analytics will appear here</p>
+          <p className="text-sm text-slate-500 mt-2">Add a few expenses to see category breakdowns, timeline spikes, and person-wise balances.</p>
+          <Link
+            to="/add"
+            className="mt-5 inline-flex px-6 py-3 rounded-2xl bg-blue-600 text-white text-sm font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
+          >
+            Add first expense
+          </Link>
+        </div>
       </div>
     );
   }
@@ -327,13 +368,13 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Settlement Pressure */}
-      {settlement.totalToSettle > 0 && (
+      {pendingSettlement.totalToSettle > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
           className="bg-amber-50 border border-amber-100 rounded-3xl p-5 flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1">Unsettled</p>
-            <p className="text-2xl font-black text-amber-800">{formatCurrency(settlement.totalToSettle)}</p>
-            <p className="text-xs text-amber-600 mt-1">{settlement.transfers.length} transfer{settlement.transfers.length > 1 ? 's' : ''} pending</p>
+            <p className="text-2xl font-black text-amber-800">{formatCurrency(pendingSettlement.totalToSettle)}</p>
+            <p className="text-xs text-amber-600 mt-1">{pendingSettlement.transfers.length} transfer{pendingSettlement.transfers.length > 1 ? 's' : ''} pending</p>
           </div>
           <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center flex-shrink-0">
             <AlertTriangle className="w-7 h-7 text-amber-500" />

@@ -180,18 +180,30 @@ export const calculateStats = (tripData: TripData) => {
   const perPersonSpend = setup.peopleCount > 0 ? totalSpent / setup.peopleCount : 0;
   const remainingPercentage = (remainingBalance / setup.totalBudget) * 100;
 
-  const tripStart = parseISO(setup.startDate);
-  const tripEnd = parseISO(setup.endDate);
+  const today = startOfDay(new Date());
+  const tripStart = startOfDay(parseISO(setup.startDate));
+  const tripEnd = startOfDay(parseISO(setup.endDate));
   const totalDays = Math.max(1, differenceInDays(tripEnd, tripStart) + 1);
-  const daysPassed = Math.max(1, differenceInDays(new Date(), tripStart) + 1);
-  const daysRemaining = Math.max(0, differenceInDays(tripEnd, new Date()));
 
-  const dailyBurnRate = totalSpent / daysPassed;
+  const hasStarted = today >= tripStart;
+  const hasEnded = today > tripEnd;
+
+  // Active trip window only; pre-trip should not distort burn-rate warnings.
+  const daysPassed = hasStarted ? Math.max(1, differenceInDays(today, tripStart) + 1) : 0;
+  const daysRemaining = hasEnded
+    ? 0
+    : hasStarted
+      ? Math.max(0, differenceInDays(tripEnd, today))
+      : totalDays;
+
+  const dailyBurnRate = daysPassed > 0 ? totalSpent / daysPassed : 0;
   const remainingPerDay = daysRemaining > 0 ? remainingBalance / daysRemaining : remainingBalance;
   const budgetLastsDays = dailyBurnRate > 0 ? remainingBalance / dailyBurnRate : Infinity;
-  const projectedEndBalance = remainingBalance - (dailyBurnRate * daysRemaining);
+  const projectedEndBalance = hasStarted
+    ? remainingBalance - (dailyBurnRate * daysRemaining)
+    : remainingBalance;
   const projectedDeficit = projectedEndBalance < 0 ? Math.abs(projectedEndBalance) : 0;
-  const isOverspending = remainingBalance < 0 || (daysRemaining > 0 && dailyBurnRate > remainingPerDay);
+  const isOverspending = remainingBalance < 0 || (hasStarted && daysRemaining > 0 && dailyBurnRate > remainingPerDay);
 
   let statusColor = 'text-green-500';
   let bgColor = 'bg-green-50';

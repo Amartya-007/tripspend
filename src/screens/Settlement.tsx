@@ -1,30 +1,20 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TripData, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
-import { ArrowRight, CheckCircle2, Users, Check, RotateCcw, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Users, Check, RotateCcw, X, ImagePlus, MessageSquare, FileImage } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
-const SETTLED_KEY = 'tripspend_settled_transfers';
-
-const makeTransferKey = (from: string, to: string, amount: number) =>
-  `${from}→${to}:${amount}`;
-
-const loadSettled = (): Set<string> => {
-  try {
-    const raw = localStorage.getItem(SETTLED_KEY);
-    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
-  } catch {
-    return new Set();
-  }
-};
-
-const saveSettled = (settled: Set<string>) => {
-  localStorage.setItem(SETTLED_KEY, JSON.stringify([...settled]));
-};
+import {
+  SettledTransfer,
+  loadSettledTransfers,
+  isSettled,
+  markSettledWithMeta,
+  unmarkSettled,
+  pruneStale,
+} from '../utils/settlements.ts';
+import { appendSettlementHistory } from '../utils/settlementHistory.ts';
 
 interface ConfirmPayload {
-  key: string;
   from: string;
   to: string;
   amount: number;
@@ -36,36 +26,98 @@ interface SettlementProps {
 
 export const Settlement: React.FC<SettlementProps> = ({ data }) => {
   const navigate = useNavigate();
+  const proofInputRef = useRef<HTMLInputElement>(null);
   const people = getTripPeople(data.setup);
   const settlement = useMemo(
     () => calculateSettlement(data.setup, data.expenses),
     [data.setup, data.expenses]
   );
-  const [settled, setSettled] = useState<Set<string>>(loadSettled);
-  const [confirmPayload, setConfirmPayload] = useState<ConfirmPayload | null>(null);
 
-  const toggleSettled = useCallback((key: string) => {
-    setSettled(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      saveSettled(next);
-      return next;
-    });
-  }, []);
+  const [settled, setSettled] = useState<SettledTransfer[]>(() => {
+    const loaded = loadSettledTransfers();
+    // Prune stale entries on load
+    return pruneStale(loaded, settlement.transfers);
+  });
+
+  const [confirmPayload, setConfirmPayload] = useState<ConfirmPayload | null>(null);
+  const [settlementNote, setSettlementNote] = useState('');
+  const [proofImage, setProofImage] = useState<string | null>(null);
+  const [proofName, setProofName] = useState<string | null>(null);
+  const [previewProof, setPreviewProof] = useState<string | null>(null);
 
   const handleMarkSettled = useCallback((payload: ConfirmPayload) => {
     setConfirmPayload(payload);
   }, []);
 
+  const resetConfirmState = useCallback(() => {
+    setConfirmPayload(null);
+    setSettlementNote('');
+    setProofImage(null);
+    setProofName(null);
+  }, []);
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read proof image'));
+      reader.onloadend = () => {
+        if (typeof reader.result !== 'string') {
+          reject(new Error('Invalid file data'));
+          return;
+        }
+        resolve(reader.result);
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handlePickProof = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setProofImage(dataUrl);
+      setProofName(file.name);
+    } catch {
+      alert('Could not read selected image. Try another file.');
+    } finally {
+      e.target.value = '';
+    }
+  }, []);
+
   const confirmSettle = useCallback(() => {
     if (!confirmPayload) return;
-    toggleSettled(confirmPayload.key);
-    setConfirmPayload(null);
-  }, [confirmPayload, toggleSettled]);
+    setSettled(prev => markSettledWithMeta(prev, confirmPayload.from, confirmPayload.to, confirmPayload.amount, {
+      note: settlementNote,
+      proofImage: proofImage || undefined,
+      proofName: proofName || undefined,
+    }));
+
+    appendSettlementHistory({
+      action: 'settled',
+      from: confirmPayload.from,
+      to: confirmPayload.to,
+      amount: confirmPayload.amount,
+      note: settlementNote,
+      proofImage: proofImage || undefined,
+      proofName: proofName || undefined,
+    });
+
+    resetConfirmState();
+  }, [confirmPayload, settlementNote, proofImage, proofName, resetConfirmState]);
+
+  const handleUnmark = useCallback((from: string, to: string, amount: number) => {
+    setSettled(prev => unmarkSettled(prev, from, to, amount));
+    appendSettlementHistory({ action: 'undo', from, to, amount });
+  }, []);
+
+  const getSettledEntry = useCallback((from: string, to: string, amount: number) => {
+    const rounded = Math.round(amount * 100);
+    return settled.find(s => s.from === from && s.to === to && Math.round(s.amount * 100) === rounded);
+  }, [settled]);
 
   const { pendingTransfers, settledTransfers } = useMemo(() => ({
-    pendingTransfers: settlement.transfers.filter(t => !settled.has(makeTransferKey(t.from, t.to, t.amount))),
-    settledTransfers: settlement.transfers.filter(t => settled.has(makeTransferKey(t.from, t.to, t.amount))),
+    pendingTransfers: settlement.transfers.filter(t => !isSettled(settled, t.from, t.to, t.amount)),
+    settledTransfers: settlement.transfers.filter(t => isSettled(settled, t.from, t.to, t.amount)),
   }), [settlement.transfers, settled]);
 
   const pendingTotal = useMemo(
@@ -93,6 +145,30 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
     );
   }
 
+  if (data.expenses.length === 0) {
+    return (
+      <div className="page-shell space-y-4">
+        <div className="page-header">
+          <h1 className="page-title">Settlement</h1>
+          <p className="page-subtitle">Who owes who</p>
+        </div>
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+            <Users className="w-8 h-8 text-blue-500" />
+          </div>
+          <p className="font-black text-slate-900 text-lg">No expenses yet</p>
+          <p className="text-sm text-slate-500 mt-2">Add the first expense to automatically generate settlement transfers.</p>
+          <button
+            onClick={() => navigate('/add')}
+            className="mt-5 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold shadow-lg shadow-blue-100"
+          >
+            Add first expense {'->'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell space-y-5">
       <div className="page-header">
@@ -102,9 +178,7 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
 
       {/* Hero summary */}
       {allSettled ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
           className="bg-gradient-to-br from-green-500 to-emerald-600 p-6 rounded-3xl text-white shadow-xl shadow-green-200 flex items-center gap-4"
         >
           <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
@@ -116,9 +190,7 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
           </div>
         </motion.div>
       ) : pendingTransfers.length > 0 ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
           className="bg-gradient-to-br from-blue-600 to-blue-700 p-6 rounded-3xl text-white shadow-xl shadow-blue-200"
         >
           <p className="text-blue-200 text-xs font-bold uppercase tracking-widest mb-1">Still to settle</p>
@@ -183,41 +255,38 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
           </p>
           <div className="space-y-3">
             <AnimatePresence>
-              {pendingTransfers.map((transfer, idx) => {
-                const key = makeTransferKey(transfer.from, transfer.to, transfer.amount);
-                return (
-                  <motion.div
-                    key={key}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: 60, scale: 0.95 }}
-                    transition={{ delay: idx * 0.04 }}
-                    className="bg-white border border-slate-100 rounded-3xl shadow-sm p-4 flex items-center gap-3"
-                  >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center text-sm font-black text-red-600 border border-red-100 flex-shrink-0">
-                        {transfer.from[0].toUpperCase()}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-900 text-sm truncate">{transfer.from}</span>
-                          <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
-                          <span className="font-bold text-slate-900 text-sm truncate">{transfer.to}</span>
-                        </div>
-                        <span className="text-xs text-slate-400 mt-0.5">{formatCurrency(transfer.amount)}</span>
-                      </div>
+              {pendingTransfers.map((transfer, idx) => (
+                <motion.div
+                  key={`${transfer.from}-${transfer.to}-${transfer.amount}`}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, x: 60, scale: 0.95 }}
+                  transition={{ delay: idx * 0.04 }}
+                  className="bg-white border border-slate-100 rounded-3xl shadow-sm p-4 flex items-center gap-3"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center text-sm font-black text-red-600 border border-red-100 flex-shrink-0">
+                      {transfer.from[0].toUpperCase()}
                     </div>
-                    <button
-                      onClick={() => handleMarkSettled({ key, from: transfer.from, to: transfer.to, amount: transfer.amount })}
-                      className="flex-shrink-0 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-100 transition-colors"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      Settle
-                    </button>
-                  </motion.div>
-                );
-              })}
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-900 text-sm truncate">{transfer.from}</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+                        <span className="font-bold text-slate-900 text-sm truncate">{transfer.to}</span>
+                      </div>
+                      <span className="text-xs text-slate-400 mt-0.5">{formatCurrency(transfer.amount)}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleMarkSettled({ from: transfer.from, to: transfer.to, amount: transfer.amount })}
+                    className="flex-shrink-0 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-100 transition-colors"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Settle
+                  </button>
+                </motion.div>
+              ))}
             </AnimatePresence>
           </div>
         </div>
@@ -231,9 +300,9 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
           </p>
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             {settledTransfers.map((transfer, idx) => {
-              const key = makeTransferKey(transfer.from, transfer.to, transfer.amount);
+              const entry = getSettledEntry(transfer.from, transfer.to, transfer.amount);
               return (
-                <React.Fragment key={key}>
+                <React.Fragment key={`${transfer.from}-${transfer.to}-${transfer.amount}`}>
                   {idx > 0 && <div className="h-px bg-slate-50 mx-4" />}
                   <motion.div layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="flex items-center gap-3 px-4 py-3 opacity-60"
@@ -247,10 +316,28 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
                         <ArrowRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
                         <span className="text-xs font-semibold text-slate-500 line-through truncate">{transfer.to}</span>
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{formatCurrency(transfer.amount)} · paid outside app</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {formatCurrency(transfer.amount)} · paid outside app
+                        {entry?.settledAt && ` · ${new Date(entry.settledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}
+                      </p>
+                      {entry?.note && (
+                        <p className="text-[10px] text-slate-500 mt-1 inline-flex items-center gap-1">
+                          <MessageSquare className="w-3 h-3" />
+                          {entry.note}
+                        </p>
+                      )}
                     </div>
+                    {entry?.proofImage && (
+                      <button
+                        onClick={() => setPreviewProof(entry.proofImage || null)}
+                        className="flex-shrink-0 p-1.5 rounded-lg text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-colors"
+                        title={entry.proofName || 'View proof'}
+                      >
+                        <FileImage className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
-                      onClick={() => toggleSettled(key)}
+                      onClick={() => handleUnmark(transfer.from, transfer.to, transfer.amount)}
                       className="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
                       title="Undo"
                     >
@@ -268,12 +355,9 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
       <AnimatePresence>
         {confirmPayload && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/40 z-40"
-              onClick={() => setConfirmPayload(null)}
+              onClick={resetConfirmState}
             />
             <motion.div
               initial={{ opacity: 0, y: 80 }}
@@ -285,11 +369,10 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
             >
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-lg font-black text-slate-900">Confirm Settlement</h3>
-                <button onClick={() => setConfirmPayload(null)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors">
+                <button onClick={resetConfirmState} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-
               <div className="bg-slate-50 rounded-2xl p-4 mb-5 flex items-center gap-3">
                 <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-sm font-black text-red-600 border border-red-100 flex-shrink-0">
                   {confirmPayload.from[0].toUpperCase()}
@@ -303,25 +386,85 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
                   <p className="text-sm text-slate-500 mt-0.5">{formatCurrency(confirmPayload.amount)}</p>
                 </div>
               </div>
-
               <p className="text-sm text-slate-600 text-center mb-6 leading-relaxed">
                 Did <span className="font-bold text-slate-900">{confirmPayload.from}</span> already pay{' '}
                 <span className="font-bold text-slate-900">{confirmPayload.to}</span> outside this app?
               </p>
-
+              <div className="space-y-3 mb-5">
+                <textarea
+                  value={settlementNote}
+                  onChange={(e) => setSettlementNote(e.target.value)}
+                  placeholder="Optional note (e.g. UPI ref, cash handover details)"
+                  rows={2}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <input
+                  ref={proofInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePickProof}
+                  className="hidden"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => proofInputRef.current?.click()}
+                    className="px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200 inline-flex items-center gap-1.5"
+                  >
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    {proofImage ? 'Replace proof' : 'Add proof image'}
+                  </button>
+                  {proofImage && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewProof(proofImage)}
+                      className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200"
+                    >
+                      Preview
+                    </button>
+                  )}
+                </div>
+                {proofName && <p className="text-[11px] text-slate-500">Attached: {proofName}</p>}
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setConfirmPayload(null)}
-                  className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-colors"
-                >
+                <button onClick={resetConfirmState}
+                  className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-colors">
                   Not yet
                 </button>
-                <button
-                  onClick={confirmSettle}
-                  className="py-3 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100"
-                >
+                <button onClick={confirmSettle}
+                  className="py-3 rounded-2xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100">
                   Yes, mark settled
                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {previewProof && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 z-50"
+              onClick={() => setPreviewProof(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-0 z-[60] flex items-center justify-center p-6"
+            >
+              <div className="relative max-w-md w-full">
+                <button
+                  onClick={() => setPreviewProof(null)}
+                  className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white text-slate-700 shadow-md flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <img src={previewProof} alt="Settlement proof" className="w-full rounded-2xl border border-white/20 shadow-2xl" />
               </div>
             </motion.div>
           </>

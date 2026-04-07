@@ -1,77 +1,202 @@
 # TripSpend
 
-A mobile-first group trip expense tracker built with React + Capacitor. Track shared spending, split costs, scan receipts, and get smart budget insights — all offline, no account needed.
+TripSpend is a mobile-first group trip expense tracker built with React, TypeScript, and Capacitor.
 
-## Features
+It helps a group set a trip budget, track expenses, split costs by participant, and settle dues with clear transfer suggestions. The app is offline-first and stores data locally on device.
 
-- **Budget tracking** — set per-person budget, monitor burn rate and daily limits
-- **Smart expense entry** — voice input, receipt camera/OCR, AI categorization (Gemini)
-- **Group splits** — track who paid, split equally or custom amounts, settlement calculator
-- **Analytics** — category breakdown, daily spending trends, deficit projections
-- **Receipt management** — attach multiple photos per expense with auto-compression
-- **Backup & restore** — export/import JSON, share summary image card
-- **Offline-first** — everything stored locally, no backend required
-- **Android app** — built with Capacitor, native camera, share, and voice support
+## What the app does
 
-## Tech Stack
+- Guided trip setup (people count, participant names, budget per person, trip dates, categories)
+- Dashboard with remaining budget, burn rate, daily limit, and overspend alerts
+- Add/Edit expense flow with:
+   - amount, category, date, note, tags
+   - payer and participants
+   - receipt attachments
+   - camera capture (native on Android)
+   - optional voice input and OCR helpers
+- Expense list and detail views with delete + undo support
+- Analytics screen with:
+   - category breakdown
+   - per-person contribution and balance
+   - daily timeline and top expenses
+   - trip health score and smart insights
+- Settlement screen with who-pays-whom transfers and mark-as-settled tracking
+- Member and category management screens
+- Settings tools:
+   - text summary share
+   - summary image share card (native file share on mobile)
+   - trip closing PDF report (totals, category chart, paid-by summary, settlements)
+   - export/import JSON backup
+   - full trip reset
+
+## Tech stack
 
 - React 19 + TypeScript
-- Capacitor 8 (Android)
-- Tailwind CSS 4
 - Vite 6
+- Tailwind CSS 4
+- Motion (animations)
+- Capacitor 8 (Android)
+- Capacitor plugins: App, Camera, Filesystem, Share
 - Tesseract.js (OCR)
-- Google Gemini API (optional AI categorization)
+- Optional Gemini categorization via API key
 
-## Getting Started
+## Data and privacy
 
-**Prerequisites:** Node.js 18+
+- No backend is required for core usage.
+- Data is persisted in localStorage.
+- If storage pressure happens, receipt image payloads may be stripped to preserve core trip data.
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Firebase setup (Google login + cloud sync)
 
-2. Copy the env file and optionally add your Gemini API key:
-   ```bash
-   cp .env.example .env.local
-   ```
-   > `VITE_GEMINI_API_KEY` is optional. Without it, AI categorization is disabled but everything else works.
+TripSpend now supports:
 
-3. Run the dev server:
-   ```bash
-   npm run dev
-   ```
+- Firebase Auth (Google sign-in)
+- Firestore backup/restore for active trip data
+- Firebase Storage is optional for future receipt upload support
 
-## Android Build
+1) In Firebase Console (project: `tripSpend`)
 
-Make sure you have Android Studio and the Android SDK installed.
+- Go to Authentication -> Sign-in method -> enable `Google` provider
+- Go to Firestore Database -> create database in production or test mode
+- For Android app support:
+   - Add Android app in Project settings
+   - Package name should match your Capacitor app id
+   - Add SHA-1 and SHA-256 from your signing/debug keystore
+   - Download `google-services.json` (keep for native plugin setup if needed later)
+
+2) Configure web env vars
+
+- Copy `.env.example` to `.env.local`
+- Fill these values from Firebase Project settings -> General -> Your apps (Web app):
+   - `VITE_FIREBASE_API_KEY`
+   - `VITE_FIREBASE_AUTH_DOMAIN`
+   - `VITE_FIREBASE_PROJECT_ID`
+   - `VITE_FIREBASE_STORAGE_BUCKET`
+   - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+   - `VITE_FIREBASE_APP_ID`
+
+3) Firestore rules (minimum)
+
+Use owner-only rules for trip data:
+
+```txt
+rules_version = '2';
+service cloud.firestore {
+   match /databases/{database}/documents {
+      match /users/{userId}/trips/{tripId} {
+         allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+   }
+}
+```
+
+4) Use it in app
+
+- Open Settings -> Cloud Sync (Firebase)
+- Sign in with Google
+- Tap `Backup to Cloud` to push local setup+expenses
+- Tap `Restore from Cloud` to pull latest backup
+
+Notes:
+
+- Current cloud sync stores `setup` + `expenses` in Firestore doc:
+   - `users/{uid}/trips/active`
+- Local storage remains primary; cloud sync is manual backup/restore.
+
+## Local development
+
+Prerequisites:
+
+- Node.js 18+
+- npm
+
+Install dependencies:
 
 ```bash
-# Build the web app
+npm install
+```
+
+Optional environment setup (for AI categorization):
+
+```bash
+cp .env.example .env.local
+```
+
+Set this only if needed:
+
+- VITE_GEMINI_API_KEY
+
+Run the app locally:
+
+```bash
+npm run dev
+```
+
+Useful commands:
+
+```bash
+npm run lint
 npm run build
+```
 
-# Sync to Android
+## Android build (Capacitor)
+
+Build web assets and sync Android project:
+
+```bash
+npm run build
 npx cap sync android
+```
 
-# Open in Android Studio
+Open Android project in Android Studio (optional):
+
+```bash
 npx cap open android
 ```
 
-## Environment Variables
+## Build a final signed APK to share
 
-| Variable | Required | Description |
-|---|---|---|
-| `VITE_GEMINI_API_KEY` | No | Enables AI-powered receipt categorization via Gemini 2.5 Flash |
+This project is already configured to read signing info from android/key.properties.
 
-## Project Structure
+1) Keystore location
 
+- Place release keystore at android/app/tripspend-release.jks
+
+2) Create android/key.properties (local file, do not commit)
+
+Example:
+
+```properties
+storeFile=app/tripspend-release.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=tripspend-key
+keyPassword=YOUR_KEY_PASSWORD
 ```
+
+3) Build signed release APK
+
+```bash
+cd android
+.\gradlew.bat clean assembleRelease
+```
+
+4) Final APK path
+
+- android/app/build/outputs/apk/release/app-release.apk
+
+You can now share this APK directly.
+
+## Project structure
+
+```text
 src/
-├── screens/        # All app screens (Dashboard, AddExpense, Analytics, etc.)
-├── components/     # Shared components (BottomNav)
-├── hooks/          # useTripData — state management + localStorage persistence
-└── utils/          # calculations, AI categorization, helpers
-android/            # Capacitor Android project
+   components/
+   hooks/
+   screens/
+   utils/
+android/
 ```
 
-## Made by Amartya Vishwakarma
+## Author
+
+Amartya Vishwakarma

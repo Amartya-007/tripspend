@@ -8,12 +8,13 @@ interface DatePickerProps {
   value: string; // yyyy-MM-dd
   onChange: (value: string) => void;
   disabled?: boolean;
+  compact?: boolean;
 }
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const SWIPE_THRESHOLD = 50;
 
-export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disabled }) => {
+export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disabled, compact = false }) => {
   const selected = useMemo(() => value ? parseISO(value) : new Date(), [value]);
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(selected));
   const [open, setOpen] = useState(false);
@@ -178,12 +179,12 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
         type="button"
         disabled={disabled}
         onClick={() => setOpen(true)}
-        className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
+        className={`w-full px-4 ${compact ? 'py-2.5 rounded-xl' : 'py-3 rounded-xl'} border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
           open ? 'border-blue-500 ring-2 ring-inset ring-blue-500 text-blue-700 bg-blue-50'
                : 'border-slate-200 text-slate-700 hover:border-slate-300'
         }`}
       >
-        <span>{format(selected, 'EEE, MMM d, yyyy')}</span>
+        <span>{format(selected, compact ? 'MMM d, yyyy' : 'EEE, MMM d, yyyy')}</span>
         <Calendar className="w-4 h-4 text-slate-400 flex-shrink-0" />
       </button>
       {sheet}
