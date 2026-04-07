@@ -6,7 +6,11 @@ import {
   signOut,
   setPersistence,
   browserLocalPersistence,
+  signInWithCredential,
+  GoogleAuthProvider,
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, googleProvider, isFirebaseReady } from '../lib/firebase';
 
 export function useFirebaseAuth() {
@@ -34,6 +38,18 @@ export function useFirebaseAuth() {
   const signInWithGoogle = async () => {
     if (!isFirebaseReady || !auth) {
       throw new Error('Firebase is not configured.');
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+      const idToken = nativeResult.credential?.idToken;
+      if (!idToken) {
+        throw new Error('Google sign-in succeeded but no ID token was returned.');
+      }
+
+      const credential = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(auth, credential);
+      return;
     }
 
     await signInWithPopup(auth, googleProvider);
