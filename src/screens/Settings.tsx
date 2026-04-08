@@ -1,24 +1,39 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RotateCcw, Edit3, ChevronRight, Download, Upload, Share2, Users, Tag, FileText, History, CloudUpload, CloudDownload, LogIn, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Directory, Filesystem } from '@capacitor/filesystem';
-import { Expense, TripData, TripSetup, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
+import { NotificationPayload } from '../components/NotificationCard';
+import { Expense, TripData, TripSetup, Trip, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
+import { TripSwitcher } from '../components/TripSwitcher';
 import { formatCurrency } from '../utils/cn';
 
 interface SettingsProps {
   onReset: () => void;
   data: TripData;
   onImport: (setup: TripSetup, expenses: Expense[]) => void;
+  notify?: (payload: NotificationPayload) => void;
   firebaseConfigured: boolean;
+  lastAutoSyncAt?: number | null;
+  lastSyncAttemptAt?: number | null;
+  autoSyncError?: string | null;
+  pendingSyncCount?: number;
+  nextRetryAt?: number | null;
   authLoading: boolean;
   userEmail: string | null;
   onSignInGoogle: () => void;
   onSignOutGoogle: () => void;
   onCloudBackup: () => void;
   onCloudRestore: () => void;
+  // Multi-trip props
+  trips?: Trip[];
+  activeTrip?: string | null;
+  onCreateTrip?: (name: string) => void;
+  onSelectTrip?: (tripId: string) => void;
+  onDeleteTrip?: (tripId: string) => void;
+  onRenameTrip?: (tripId: string, newName: string) => void;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -37,56 +52,99 @@ export const Settings: React.FC<SettingsProps> = ({
   onReset,
   data,
   onImport,
+  notify,
   firebaseConfigured,
+  lastAutoSyncAt = null,
+  lastSyncAttemptAt = null,
+  autoSyncError = null,
+  pendingSyncCount = 0,
+  nextRetryAt = null,
   authLoading,
   userEmail,
   onSignInGoogle,
   onSignOutGoogle,
   onCloudBackup,
   onCloudRestore,
+  trips = [],
+  activeTrip = null,
+  onCreateTrip,
+  onSelectTrip,
+  onDeleteTrip,
+  onRenameTrip,
 }) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const totalBudget = data.setup?.totalBudget ?? 0;
-  const totalSpent = data.expenses.reduce((s, e) => s + e.amount, 0);
+  const totalBudget = useMemo(() => data.setup?.totalBudget ?? 0, [data.setup]);
+  const totalSpent = useMemo(() => data.expenses.reduce((s, e) => s + e.amount, 0), [data.expenses]);
+  const remaining = useMemo(() => totalBudget - totalSpent, [totalBudget, totalSpent]);
+  const categoryTotals = useMemo(() => data.expenses.reduce((acc, exp) => {
+    acc[exp.category] = (acc[exp.category] || 0) + exp.amount;
+    return acc;
+  }, {} as Record<string, number>), [data.expenses]);
 
-  const handleReset = () => {
+  const formatTimeAgo = useCallback((timestamp: number | null): string => {
+    if (!timestamp) return 'Never synced yet';
+    const diffMs = Date.now() - timestamp;
+    if (diffMs < 10000) return 'Just now';
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'Less than a minute ago';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} hr ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  }, []);
+
+  const formatRetry = useCallback((timestamp: number | null): string => {
+    if (!timestamp || timestamp <= Date.now()) return 'now';
+    const diffMs = timestamp - Date.now();
+    const secs = Math.ceil(diffMs / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.ceil(secs / 60);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.ceil(mins / 60);
+    return `${hrs}h`;
+  }, []);
+
+  const pushNotice = useCallback((payload: NotificationPayload) => {
+    if (notify) {
+      notify(payload);
+      return;
+    }
+    alert(payload.message ? `${payload.title}\n${payload.message}` : payload.title);
+  }, [notify]);
+
+  const handleReset = useCallback(() => {
     if (window.confirm('Reset the trip? This will delete all expenses and setup data.')) {
       onReset();
       navigate('/setup');
     }
-  };
+  }, [navigate, onReset]);
 
-  const handleShare = async () => {
-    const remaining = totalBudget - totalSpent;
-    const catTotals = data.expenses.reduce((acc, exp) => {
-      acc[exp.category] = (acc[exp.category] || 0) + exp.amount;
-      return acc;
-    }, {} as Record<string, number>);
+  const handleShare = useCallback(async () => {
 
     let text = `📊 *TripSpend Summary*\n\n`;
     text += `💰 Budget: ${formatCurrency(totalBudget)}\n`;
     text += `💸 Spent: ${formatCurrency(totalSpent)}\n`;
     text += `🏦 Remaining: ${formatCurrency(remaining)}\n\n`;
     text += `*By Category:*\n`;
-    Object.entries(catTotals).forEach(([cat, amt]) => { text += `- ${cat}: ${formatCurrency(amt)}\n`; });
+    Object.entries(categoryTotals).forEach(([cat, amt]) => { text += `- ${cat}: ${formatCurrency(amt)}\n`; });
     text += `\n_Generated by TripSpend_`;
 
     if (navigator.share) {
       await navigator.share({ title: 'TripSpend Summary', text }).catch(() => {});
     } else {
       await navigator.clipboard.writeText(text);
-      alert('Summary copied to clipboard!');
+      pushNotice({ title: 'Copied', message: 'Summary copied to clipboard.', variant: 'success' });
     }
-  };
+  }, [categoryTotals, pushNotice, remaining, totalBudget, totalSpent]);
 
-  const handleShareImage = async () => {
-    const remaining = totalBudget - totalSpent;
+  const handleShareImage = useCallback(async () => {
     const canvas = document.createElement('canvas');
     canvas.width = 1080; canvas.height = 1350;
     const ctx = canvas.getContext('2d');
-    if (!ctx) { alert('Could not generate image.'); return; }
+    if (!ctx) { pushNotice({ title: 'Image Error', message: 'Could not generate image.', variant: 'error' }); return; }
 
     ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, 1080, 1350);
     ctx.fillStyle = '#2563eb'; ctx.fillRect(70, 70, 940, 220);
@@ -97,19 +155,15 @@ export const Settings: React.FC<SettingsProps> = ({
     ctx.fillText(`Spent: Rs ${totalSpent.toFixed(0)}`, 110, 460);
     ctx.fillText(`Remaining: Rs ${remaining.toFixed(0)}`, 110, 540);
 
-    const catTotals = data.expenses.reduce((acc, exp) => {
-      acc[exp.category] = (acc[exp.category] || 0) + exp.amount;
-      return acc;
-    }, {} as Record<string, number>);
     ctx.font = 'bold 38px sans-serif'; ctx.fillText('Category Breakdown', 110, 660);
     ctx.font = '32px sans-serif';
     let y = 740;
-    Object.entries(catTotals).forEach(([cat, amt]) => { ctx.fillText(`${cat}: Rs ${amt.toFixed(0)}`, 110, y); y += 64; });
+    Object.entries(categoryTotals).forEach(([cat, amt]) => { ctx.fillText(`${cat}: Rs ${amt.toFixed(0)}`, 110, y); y += 64; });
     ctx.fillStyle = '#475569'; ctx.font = '26px sans-serif';
     ctx.fillText(`Generated on ${new Date().toLocaleDateString()}`, 110, 1240);
 
     const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
-    if (!blob) { alert('Could not generate image.'); return; }
+    if (!blob) { pushNotice({ title: 'Image Error', message: 'Could not generate image.', variant: 'error' }); return; }
 
     const fileName = `tripspend_summary_${Date.now()}.png`;
     const file = new File([blob], fileName, { type: 'image/png' });
@@ -130,23 +184,58 @@ export const Settings: React.FC<SettingsProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [categoryTotals, pushNotice, remaining, totalBudget, totalSpent]);
 
-  const handleExport = () => {
-    const uri = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
+  const handleExport = useCallback(async () => {
     const date = new Date().toISOString().split('T')[0];
-    const a = document.createElement('a');
-    a.setAttribute('href', uri);
-    a.setAttribute('download', `tripspend_backup_${date}.json`);
-    a.click();
-  };
+    const fileName = `tripspend_backup_${date}.json`;
+    const json = JSON.stringify(data, null, 2);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const b64 = await blobToBase64(blob);
+        const result = await Filesystem.writeFile({
+          path: fileName,
+          data: b64,
+          directory: Directory.Cache,
+        });
+        await Share.share({
+          title: 'TripSpend Backup',
+          text: 'TripSpend backup file',
+          files: [result.uri],
+          dialogTitle: 'Export backup',
+        });
+        pushNotice({ title: 'Backup Ready', message: 'Backup file is ready to share or save.', variant: 'success' });
+        return;
+      } catch (error) {
+        console.error('Native backup export failed', error);
+        pushNotice({ title: 'Export Failed', message: 'Could not export backup on this device.', variant: 'error' });
+        return;
+      }
+    }
+
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      pushNotice({ title: 'Backup Downloaded', message: 'Backup file has been downloaded.', variant: 'success' });
+    } catch (error) {
+      console.error('Web backup export failed', error);
+      pushNotice({ title: 'Export Failed', message: 'Could not download backup file.', variant: 'error' });
+    }
+  }, [data, pushNotice]);
 
   // PDF-safe currency formatter — jsPDF helvetica doesn't support ₹
-  const pdfCurrency = (amount: number) =>
-    'Rs. ' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(amount);
+  const pdfCurrency = useCallback((amount: number) =>
+    'Rs. ' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(amount), []);
 
-  const handleExportClosingReport = async () => {
-    if (!data.setup) { alert('Set up a trip first to generate a report.'); return; }
+  const handleExportClosingReport = useCallback(async () => {
+    if (!data.setup) { pushNotice({ title: 'Trip Setup Required', message: 'Set up a trip first to generate a report.', variant: 'warning' }); return; }
     try {
       const { jsPDF } = await import('jspdf');
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -279,11 +368,11 @@ export const Settings: React.FC<SettingsProps> = ({
       const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
       URL.revokeObjectURL(url);
     } catch {
-      alert('Could not generate PDF report.');
+      pushNotice({ title: 'Report Error', message: 'Could not generate PDF report.', variant: 'error' });
     }
-  };
+  }, [data, pdfCurrency, pushNotice]);
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -292,13 +381,13 @@ export const Settings: React.FC<SettingsProps> = ({
         const parsed = JSON.parse(ev.target?.result as string);
         if (parsed.setup && Array.isArray(parsed.expenses)) {
           onImport(parsed.setup, parsed.expenses);
-          alert('Backup restored!');
+          pushNotice({ title: 'Backup Restored', message: 'Your backup was restored successfully.', variant: 'success' });
           navigate('/');
-        } else { alert('Invalid backup file.'); }
-      } catch { alert('Could not read backup file.'); }
+        } else { pushNotice({ title: 'Invalid Backup', message: 'Selected file is not a valid backup.', variant: 'error' }); }
+      } catch { pushNotice({ title: 'Import Failed', message: 'Could not read backup file.', variant: 'error' }); }
     };
     reader.readAsText(file);
-  };
+  }, [navigate, onImport, pushNotice]);
 
   return (
     <div className="page-shell space-y-6">
@@ -306,6 +395,25 @@ export const Settings: React.FC<SettingsProps> = ({
         <h1 className="page-title">Settings</h1>
         <p className="page-subtitle">Manage your trip</p>
       </div>
+
+      {/* Multi-Trip Manager */}
+      {trips.length > 0 && (
+        <Section label="My Trips" allowOverflow>
+          <div className="px-4 py-3 relative z-20">
+            <TripSwitcher
+              trips={trips}
+              activeTrip={activeTrip}
+              onSelectTrip={(tripId) => {
+                onSelectTrip?.(tripId);
+                navigate('/');
+              }}
+              onCreateTrip={(name) => onCreateTrip?.(name)}
+              onDeleteTrip={(tripId) => onDeleteTrip?.(tripId)}
+              onRenameTrip={(tripId, name) => onRenameTrip?.(tripId, name)}
+            />
+          </div>
+        </Section>
+      )}
 
       {/* Trip */}
       <Section label="Trip">
@@ -345,7 +453,7 @@ export const Settings: React.FC<SettingsProps> = ({
       </Section>
 
       {/* Cloud */}
-      <Section label="Cloud Sync (Firebase)">
+      <Section label="Cloud Sync">
         {!firebaseConfigured && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
             Firebase is not configured yet. Add VITE_FIREBASE_* values to your env file.
@@ -354,6 +462,17 @@ export const Settings: React.FC<SettingsProps> = ({
 
         {firebaseConfigured && (
           <>
+            <div className={`mx-4 mt-4 mb-2 rounded-2xl border px-3.5 py-3 ${autoSyncError ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
+              <p className={`text-xs font-semibold ${autoSyncError ? 'text-rose-700' : 'text-emerald-700'}`}>
+                {autoSyncError ? autoSyncError : `Last auto-sync: ${formatTimeAgo(lastAutoSyncAt)}`}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-600">
+                <p>Last success: <span className="font-semibold text-slate-700">{formatTimeAgo(lastAutoSyncAt)}</span></p>
+                <p>Last attempt: <span className="font-semibold text-slate-700">{formatTimeAgo(lastSyncAttemptAt)}</span></p>
+                <p>Pending changes: <span className="font-semibold text-slate-700">{pendingSyncCount}</span></p>
+                <p>Next retry: <span className="font-semibold text-slate-700">{pendingSyncCount > 0 ? formatRetry(nextRetryAt) : '-'}</span></p>
+              </div>
+            </div>
             <SettingItem
               icon={userEmail ? <LogOut className="w-4.5 h-4.5 text-slate-700" /> : <LogIn className="w-4.5 h-4.5 text-blue-600" />}
               iconBg={userEmail ? 'bg-slate-100' : 'bg-blue-50'}
@@ -366,7 +485,7 @@ export const Settings: React.FC<SettingsProps> = ({
               icon={<CloudUpload className="w-4.5 h-4.5 text-emerald-600" />}
               iconBg="bg-emerald-50"
               label="Backup to Cloud"
-              description="Save setup + expenses to Firestore"
+              description="Save setup + expenses to Cloud"
               onClick={onCloudBackup}
             />
             <Divider />
@@ -374,7 +493,7 @@ export const Settings: React.FC<SettingsProps> = ({
               icon={<CloudDownload className="w-4.5 h-4.5 text-indigo-600" />}
               iconBg="bg-indigo-50"
               label="Restore from Cloud"
-              description="Load latest backup from Firestore"
+              description="Load latest backup from Cloud"
               onClick={onCloudRestore}
             />
           </>
@@ -385,7 +504,7 @@ export const Settings: React.FC<SettingsProps> = ({
       <Section label="Data">
         <SettingItem icon={<Download className="w-4.5 h-4.5 text-purple-600" />} iconBg="bg-purple-50"
           label="Export Backup" description="Save all data as JSON"
-          onClick={handleExport} />
+          onClick={() => { void handleExport(); }} />
         <Divider />
         <SettingItem icon={<Upload className="w-4.5 h-4.5 text-amber-600" />} iconBg="bg-amber-50"
           label="Import Backup" description="Restore from a JSON backup"
@@ -410,10 +529,10 @@ export const Settings: React.FC<SettingsProps> = ({
   );
 };
 
-const Section: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+const Section: React.FC<{ label: string; children: React.ReactNode; allowOverflow?: boolean }> = ({ label, children, allowOverflow = false }) => (
   <div>
     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">{label}</p>
-    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+    <div className={`bg-white rounded-3xl border border-slate-100 shadow-sm ${allowOverflow ? 'overflow-visible relative z-20' : 'overflow-hidden'}`}>
       {children}
     </div>
   </div>

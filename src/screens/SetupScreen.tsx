@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, IndianRupee, ArrowRight, Lock, Tag, X, Plus } from 'lucide-react';
 import { TripSetup } from '../utils/calculations.ts';
@@ -10,9 +10,18 @@ import { DatePicker } from '../components/DatePicker.tsx';
 interface SetupScreenProps {
   onSave: (setup: TripSetup) => void;
   initialData?: TripSetup | null;
+  onNameTrip?: (name: string) => void;
+  initialTripName?: string;
 }
 
-export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData }) => {
+const DEFAULT_CATEGORIES = ['Food', 'Travel', 'Stay', 'Misc'];
+const STEPS = ['people-count', 'people-names', 'budget', 'dates', 'categories'] as const;
+const MIN_PEOPLE = 1;
+const MAX_PEOPLE = 20;
+const MAX_BUDGET_PER_PERSON = 10000000;
+const BUDGET_REGEX = /^\d*(?:\.\d{0,2})?$/;
+
+export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, onNameTrip, initialTripName }) => {
   const [step, setStep] = useState<'people-count' | 'people-names' | 'budget' | 'dates' | 'categories'>('people-count');
   const [peopleCount, setPeopleCount] = useState(initialData?.peopleCount?.toString() || '');
   const [participants, setParticipants] = useState<string[]>(initialData?.participants || []);
@@ -20,17 +29,32 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
   const [startDate, setStartDate] = useState(initialData?.startDate || format(new Date(), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(initialData?.endDate || format(addDays(new Date(), 3), 'yyyy-MM-dd'));
   const [lockPrevious, setLockPrevious] = useState(initialData?.lockPreviousDays || false);
-  const [categories, setCategories] = useState<string[]>(initialData?.customCategories || ['Food', 'Travel', 'Stay', 'Misc']);
+  const [categories, setCategories] = useState<string[]>(initialData?.customCategories || DEFAULT_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
+  const [tripName, setTripName] = useState(initialTripName || '');
 
   const navigate = useNavigate();
 
-  const peopleNum = parseInt(peopleCount) || 0;
-  const budgetNum = parseFloat(budget) || 0;
-  const totalBudget = peopleNum * budgetNum;
+  const peopleNum = useMemo(() => parseInt(peopleCount) || 0, [peopleCount]);
+  const budgetNum = useMemo(() => parseFloat(budget) || 0, [budget]);
+  const totalBudget = useMemo(() => peopleNum * budgetNum, [peopleNum, budgetNum]);
+  const trimmedNewCategory = useMemo(() => newCategory.trim(), [newCategory]);
+  const categoriesSet = useMemo(() => new Set(categories), [categories]);
+  const canAddCategory = useMemo(() => Boolean(trimmedNewCategory) && !categoriesSet.has(trimmedNewCategory), [trimmedNewCategory, categoriesSet]);
+  const needsParticipantRemoval = useMemo(() => participants.length > peopleNum, [participants.length, peopleNum]);
+  const currentStepIndex = useMemo(() => STEPS.indexOf(step), [step]);
 
-  const handlePeopleCountNext = () => {
-    if (peopleNum <= 0) return;
+  useEffect(() => {
+    if (endDate < startDate) {
+      setEndDate(startDate);
+    }
+  }, [startDate, endDate]);
+
+  const handlePeopleCountNext = useCallback(() => {
+    if (peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE) {
+      alert(`Please enter between ${MIN_PEOPLE} and ${MAX_PEOPLE} people.`);
+      return;
+    }
     if (peopleNum >= participants.length) {
       setParticipants(prev =>
         Array.from({ length: peopleNum }, (_, i) =>
@@ -39,33 +63,55 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
       );
     }
     setStep('people-names');
-  };
+  }, [peopleNum, participants.length]);
 
-  const updateParticipantName = (index: number, name: string) => {
+  const updateParticipantName = useCallback((index: number, name: string) => {
     const updated = [...participants];
     updated[index] = name;
     setParticipants(updated);
-  };
+  }, [participants]);
 
-  const removeParticipant = (idx: number) => {
+  const removeParticipant = useCallback((idx: number) => {
     setParticipants(prev => prev.filter((_, i) => i !== idx));
-  };
+  }, []);
 
-  const handleAddCategory = () => {
-    if (newCategory.trim() && !categories.includes(newCategory.trim())) {
-      setCategories([...categories, newCategory.trim()]);
+  const handleAddCategory = useCallback(() => {
+    if (canAddCategory) {
+      setCategories([...categories, trimmedNewCategory]);
       setNewCategory('');
     }
-  };
+  }, [canAddCategory, categories, trimmedNewCategory]);
 
-  const handleRemoveCategory = (idx: number) => {
+  const handleRemoveCategory = useCallback((idx: number) => {
     if (categories.length > 1) {
       setCategories(categories.filter((_, i) => i !== idx));
     }
-  };
+  }, [categories]);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
+    if (peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE) {
+      alert(`People count must be between ${MIN_PEOPLE} and ${MAX_PEOPLE}.`);
+      return;
+    }
+    if (budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON) {
+      alert(`Budget per person must be between 1 and ${formatCurrency(MAX_BUDGET_PER_PERSON)}.`);
+      return;
+    }
+    if (endDate < startDate) {
+      alert('End date cannot be before start date.');
+      return;
+    }
+
     if (peopleNum > 0 && budgetNum > 0 && startDate && endDate) {
+      if (!initialData && onNameTrip) {
+        const cleanName = tripName.trim();
+        if (!cleanName) {
+          alert('Please name your trip before starting.');
+          return;
+        }
+        onNameTrip(cleanName);
+      }
+
       onSave({
         peopleCount: peopleNum,
         budgetPerPerson: budgetNum,
@@ -74,13 +120,58 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
         endDate,
         lockPreviousDays: lockPrevious,
         participants: participants.filter(p => p.trim()),
-        customCategories: categories,
+        customCategories: categories.filter(c => c.trim()),
       });
       navigate('/');
     }
-  };
+  }, [budgetNum, categories, endDate, initialData, lockPrevious, navigate, onNameTrip, onSave, participants, peopleNum, startDate, totalBudget, tripName]);
 
-  const steps = ['people-count', 'people-names', 'budget', 'dates', 'categories'] as const;
+  const handlePeopleCountChange = useCallback((value: string) => {
+    const digitsOnly = value.replace(/\D/g, '');
+    if (!digitsOnly) {
+      setPeopleCount('');
+      return;
+    }
+    const parsed = Number(digitsOnly);
+    if (!Number.isFinite(parsed)) return;
+    setPeopleCount(String(Math.min(MAX_PEOPLE, Math.max(0, parsed))));
+  }, []);
+
+  const handleBudgetChange = useCallback((value: string) => {
+    if (!BUDGET_REGEX.test(value)) return;
+    if (!value) {
+      setBudget('');
+      return;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed > MAX_BUDGET_PER_PERSON) {
+      setBudget(String(MAX_BUDGET_PER_PERSON));
+      return;
+    }
+    setBudget(value);
+  }, []);
+
+  const handleTripNameChange = useCallback((value: string) => {
+    setTripName(value);
+  }, []);
+
+  const toggleLockPrevious = useCallback(() => {
+    setLockPrevious(prev => !prev);
+  }, []);
+
+  const goToStep = useCallback((nextStep: typeof step) => {
+    setStep(nextStep);
+  }, []);
+
+  const handleNewCategoryChange = useCallback((value: string) => {
+    setNewCategory(value);
+  }, []);
+
+  const goBack = useCallback(() => {
+    navigate('/');
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 px-4 py-7 flex flex-col items-center justify-center">
@@ -91,12 +182,12 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
       >
         {/* Progress dots */}
         <div className="flex justify-between items-center mb-8">
-          {steps.map((s, idx) => (
+          {STEPS.map((s, idx) => (
             <motion.div
               key={s}
               className={`h-2 rounded-full transition-all duration-300 ${
                 step === s ? 'bg-blue-600 w-8' :
-                steps.indexOf(step) > idx ? 'bg-blue-300 w-2' : 'bg-slate-200 w-2'
+                currentStepIndex > idx ? 'bg-blue-300 w-2' : 'bg-slate-200 w-2'
               }`}
             />
           ))}
@@ -119,15 +210,15 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                   Number of People
                 </label>
                 <input
-                  type="number" min="1" max="20" autoFocus
+                  type="number" min={MIN_PEOPLE} max={MAX_PEOPLE} autoFocus
                   value={peopleCount}
-                  onChange={(e) => setPeopleCount(e.target.value)}
+                  onChange={(e) => handlePeopleCountChange(e.target.value)}
                   placeholder="e.g. 4"
                   className="input-field text-4xl font-black text-center"
                 />
-                <p className="text-xs text-slate-400 mt-2 text-center">1–20 people</p>
+                <p className="text-xs text-slate-400 mt-2 text-center">{MIN_PEOPLE}–{MAX_PEOPLE} people</p>
               </div>
-              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handlePeopleCountNext} disabled={peopleNum <= 0} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handlePeopleCountNext} disabled={peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed">
                 Next →
               </motion.button>
             </motion.div>
@@ -141,7 +232,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                 <p className="text-slate-500 mt-1 text-sm">Enter names for each participant</p>
               </div>
 
-              {participants.length > peopleNum && (
+              {needsParticipantRemoval && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-semibold text-amber-700 text-center">
                   Remove {participants.length - peopleNum} person{participants.length - peopleNum > 1 ? 's' : ''} to match your count of {peopleNum}
                 </motion.div>
@@ -168,7 +259,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                         placeholder={`Person ${idx + 1}`}
                         className="input-field text-sm flex-1"
                       />
-                      {participants.length > peopleNum && (
+                      {needsParticipantRemoval && (
                         <motion.button
                           whileTap={{ scale: 0.9 }}
                           type="button"
@@ -184,8 +275,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
               </div>
 
               <div className="flex gap-2 pt-1">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('people-count')} className="btn-secondary flex-1">← Back</motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('budget')} disabled={participants.length !== peopleNum} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed">Next →</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('people-count')} className="btn-secondary flex-1">← Back</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('budget')} disabled={participants.length !== peopleNum} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed">Next →</motion.button>
               </div>
             </motion.div>
           )}
@@ -204,15 +295,16 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                   </div>
                   Budget per Person
                 </label>
-                <input type="number" autoFocus value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="₹" className="input-field text-4xl font-black text-center" />
+                <input type="number" min="1" max={MAX_BUDGET_PER_PERSON} autoFocus value={budget} onChange={(e) => handleBudgetChange(e.target.value)} placeholder="₹" className="input-field text-4xl font-black text-center overflow-hidden" />
+                <p className="text-xs text-slate-400 mt-2 text-center">Max {formatCurrency(MAX_BUDGET_PER_PERSON)} per person</p>
               </div>
               <motion.div layout className="bg-gradient-to-br from-blue-50 to-blue-100 p-5 rounded-2xl border-2 border-blue-200">
                 <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Total Trip Budget</p>
                 <p className="text-3xl font-black text-blue-900">{formatCurrency(totalBudget)}</p>
               </motion.div>
               <div className="flex gap-2">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('people-names')} className="btn-secondary flex-1">← Back</motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('dates')} disabled={budgetNum <= 0} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed">Next →</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('people-names')} className="btn-secondary flex-1">← Back</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('dates')} disabled={budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed">Next →</motion.button>
               </div>
             </motion.div>
           )}
@@ -231,7 +323,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2.5">End Date</label>
-                  <DatePicker value={endDate} onChange={setEndDate} />
+                  <DatePicker value={endDate} onChange={setEndDate} minDate={startDate} />
                 </div>
               </div>
               <div className="flex items-center justify-between bg-gradient-to-r from-slate-50 to-slate-100 p-4 rounded-2xl border border-slate-200">
@@ -244,13 +336,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                     <p className="text-xs text-slate-500">Prevent edits</p>
                   </div>
                 </div>
-                <button onClick={() => setLockPrevious(!lockPrevious)} className={`w-14 h-7 rounded-full transition-all relative shadow-sm ${lockPrevious ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300'}`}>
+                <button onClick={toggleLockPrevious} className={`w-14 h-7 rounded-full transition-all relative shadow-sm ${lockPrevious ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300'}`}>
                   <motion.div layout className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${lockPrevious ? 'left-8' : 'left-1'}`} />
                 </button>
               </div>
               <div className="flex gap-2">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('budget')} className="btn-secondary flex-1">← Back</motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('categories')} className="btn-primary flex-1">Next →</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('budget')} className="btn-secondary flex-1">← Back</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('categories')} className="btn-primary flex-1">Next →</motion.button>
               </div>
             </motion.div>
           )}
@@ -286,21 +378,33 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData })
                   ))}
                 </AnimatePresence>
               </div>
+              {!initialData && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2.5">Trip Name</label>
+                  <input
+                    type="text"
+                    value={tripName}
+                    onChange={(e) => handleTripNameChange(e.target.value)}
+                    placeholder="e.g. Goa Friends 2026"
+                    className="input-field text-sm"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <input
                   type="text" value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
+                  onChange={(e) => handleNewCategoryChange(e.target.value)}
                   placeholder="Add new category..."
                   onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
                   className="input-field flex-1 text-sm"
                 />
-                <button onClick={handleAddCategory} className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors">
+                <button onClick={handleAddCategory} disabled={!canAddCategory} className="px-4 py-2 bg-blue-600 disabled:bg-slate-200 text-white rounded-xl hover:bg-blue-700 transition-colors">
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
               <div className="flex gap-2">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setStep('dates')} className="btn-secondary flex-1">← Back</motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleSave} disabled={peopleNum <= 0 || budgetNum <= 0} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('dates')} className="btn-secondary flex-1">← Back</motion.button>
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleSave} disabled={peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE || budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON || endDate < startDate} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                   {initialData ? 'Update' : 'Start Trip'} <ArrowRight className="w-4 h-4" />
                 </motion.button>
               </div>

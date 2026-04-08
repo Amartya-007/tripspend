@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, RotateCcw, FileImage, History, MessageSquare, Trash2 } from 'lucide-react';
 import { formatCurrency } from '../utils/cn';
@@ -9,10 +9,18 @@ import {
 } from '../utils/settlementHistory.ts';
 import { motion, AnimatePresence } from 'motion/react';
 
+const historyDateFmt = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 export const SettlementLog: React.FC = () => {
   const navigate = useNavigate();
   const [entries, setEntries] = useState<SettlementHistoryEntry[]>(() => loadSettlementHistory());
   const [previewProof, setPreviewProof] = useState<string | null>(null);
+  const hasEntries = entries.length > 0;
 
   const stats = useMemo(() => {
     const settled = entries.filter(e => e.action === 'settled').length;
@@ -20,18 +28,39 @@ export const SettlementLog: React.FC = () => {
     return { settled, undone };
   }, [entries]);
 
-  const handleClear = () => {
+  const displayEntries = useMemo(() => {
+    return entries.map((entry) => ({
+      ...entry,
+      actionLabel: entry.action === 'settled' ? 'paid' : 're-opened',
+      dateLabel: historyDateFmt.format(new Date(entry.createdAt)),
+      isSettled: entry.action === 'settled',
+    }));
+  }, [entries]);
+
+  const goBack = useCallback(() => {
+    navigate('/settings');
+  }, [navigate]);
+
+  const closeProofPreview = useCallback(() => {
+    setPreviewProof(null);
+  }, []);
+
+  const openProofPreview = useCallback((proof: string | null | undefined) => {
+    setPreviewProof(proof || null);
+  }, []);
+
+  const handleClear = useCallback(() => {
     if (!window.confirm('Clear full settlement log? This does not change current settled state.')) return;
     clearSettlementHistory();
     setEntries([]);
-  };
+  }, []);
 
   return (
     <div className="page-shell space-y-5">
       <div className="page-header flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate('/settings')}
+            onClick={goBack}
             className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-600 flex items-center justify-center"
             title="Back"
           >
@@ -44,7 +73,7 @@ export const SettlementLog: React.FC = () => {
         </div>
       </div>
 
-      {entries.length > 0 && (
+      {hasEntries && (
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 flex items-center justify-between">
           <div className="text-xs text-slate-500 font-semibold">
             <span className="text-emerald-600 font-bold">{stats.settled}</span> settled actions ·{' '}
@@ -60,7 +89,7 @@ export const SettlementLog: React.FC = () => {
         </div>
       )}
 
-      {entries.length === 0 ? (
+      {!hasEntries ? (
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8 text-center">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
             <History className="w-7 h-7 text-slate-400" />
@@ -70,19 +99,19 @@ export const SettlementLog: React.FC = () => {
         </div>
       ) : (
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          {entries.map((entry, idx) => (
+          {displayEntries.map((entry, idx) => (
             <React.Fragment key={entry.id}>
               {idx > 0 && <div className="h-px bg-slate-50 mx-4" />}
               <div className="px-4 py-3 flex items-start gap-3">
-                <div className={`mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center ${entry.action === 'settled' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}>
-                  {entry.action === 'settled' ? <Check className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <div className={`mt-0.5 w-7 h-7 rounded-lg border flex items-center justify-center ${entry.isSettled ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}>
+                  {entry.isSettled ? <Check className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800">
-                    {entry.from} {entry.action === 'settled' ? 'paid' : 're-opened'} {entry.to}
+                    {entry.from} {entry.actionLabel} {entry.to}
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    {formatCurrency(entry.amount)} · {new Date(entry.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {formatCurrency(entry.amount)} · {entry.dateLabel}
                   </p>
                   {entry.note && (
                     <p className="text-[11px] text-slate-500 mt-1 inline-flex items-center gap-1">
@@ -93,7 +122,7 @@ export const SettlementLog: React.FC = () => {
                 </div>
                 {entry.proofImage && (
                   <button
-                    onClick={() => setPreviewProof(entry.proofImage || null)}
+                    onClick={() => openProofPreview(entry.proofImage)}
                     className="p-1.5 rounded-lg text-blue-500 hover:text-blue-700 hover:bg-blue-50 transition-colors"
                     title={entry.proofName || 'View proof'}
                   >
@@ -114,7 +143,7 @@ export const SettlementLog: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/80 z-50"
-              onClick={() => setPreviewProof(null)}
+              onClick={closeProofPreview}
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   User,
   onAuthStateChanged,
@@ -16,9 +16,10 @@ import { auth, googleProvider, isFirebaseReady } from '../lib/firebase';
 export function useFirebaseAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const isConfigured = Boolean(isFirebaseReady && auth);
 
   useEffect(() => {
-    if (!isFirebaseReady || !auth) {
+    if (!isConfigured || !auth) {
       setLoading(false);
       return;
     }
@@ -33,10 +34,10 @@ export function useFirebaseAuth() {
     });
 
     return () => unsub();
-  }, []);
+  }, [isConfigured]);
 
-  const signInWithGoogle = async () => {
-    if (!isFirebaseReady || !auth) {
+  const signInWithGoogle = useCallback(async () => {
+    if (!isConfigured || !auth) {
       throw new Error('Firebase is not configured.');
     }
 
@@ -53,12 +54,12 @@ export function useFirebaseAuth() {
     }
 
     await signInWithPopup(auth, googleProvider);
-  };
+  }, [isConfigured]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     if (!auth) return;
     await signOut(auth);
-  };
+  }, []);
 
   return useMemo(
     () => ({
@@ -66,8 +67,8 @@ export function useFirebaseAuth() {
       loading,
       signInWithGoogle,
       logout,
-      isConfigured: isFirebaseReady,
+      isConfigured,
     }),
-    [user, loading]
+    [user, loading, signInWithGoogle, logout, isConfigured]
   );
 }

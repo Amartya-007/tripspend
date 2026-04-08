@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Expense, TripSetup } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
@@ -15,7 +15,46 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const expense = expenses.find((item) => item.id === id);
+  const expense = useMemo(() => expenses.find((item) => item.id === id), [expenses, id]);
+
+  const backToExpenses = useCallback(() => {
+    navigate('/expenses');
+  }, [navigate]);
+
+  const expenseDate = useMemo(() => {
+    if (!expense) return null;
+    return parseISO(expense.date);
+  }, [expense]);
+
+  const formattedExpenseDate = useMemo(() => {
+    if (!expenseDate) return '';
+    return format(expenseDate, 'EEEE, MMM dd, yyyy');
+  }, [expenseDate]);
+
+  const createdAtLabel = useMemo(() => {
+    if (!expense?.createdAt) return null;
+    return format(new Date(expense.createdAt), 'hh:mm a');
+  }, [expense?.createdAt]);
+
+  const isLocked = useMemo(() => {
+    if (!expenseDate) return false;
+    if (!setup?.lockPreviousDays) return false;
+    return isBefore(startOfDay(expenseDate), startOfDay(new Date()));
+  }, [expenseDate, setup?.lockPreviousDays]);
+
+  const participants = useMemo(() => expense?.participants ?? [], [expense?.participants]);
+  const tags = useMemo(() => expense?.tags ?? [], [expense?.tags]);
+
+  const receipts = useMemo(() => {
+    if (!expense) return [];
+    if (expense.receipts && expense.receipts.length > 0) return expense.receipts;
+    return expense.receiptImage ? [{ image: expense.receiptImage, name: expense.receiptName }] : [];
+  }, [expense]);
+
+  const splitPerPerson = useMemo(() => {
+    if (!expense || participants.length === 0) return null;
+    return `₹${(expense.amount / participants.length).toFixed(0)} each`;
+  }, [expense, participants.length]);
 
   if (!expense) {
     return (
@@ -23,7 +62,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <p className="text-slate-700 font-semibold">Expense not found.</p>
           <button
-            onClick={() => navigate('/expenses')}
+            onClick={backToExpenses}
             className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold"
           >
             Back to Expenses
@@ -33,12 +72,11 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
     );
   }
 
-  const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(expense.date)), startOfDay(new Date()));
-  const receipts = (expense.receipts && expense.receipts.length > 0)
-    ? expense.receipts
-    : (expense.receiptImage ? [{ image: expense.receiptImage, name: expense.receiptName }] : []);
+  const goToEdit = useCallback(() => {
+    navigate(`/edit/${expense.id}`);
+  }, [navigate, expense.id]);
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (isLocked) {
       alert('This expense is locked and cannot be deleted.');
       return;
@@ -49,13 +87,13 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
 
     onDelete(expense.id);
     navigate('/expenses');
-  };
+  }, [expense.id, isLocked, navigate, onDelete]);
 
   return (
     <div className="page-shell space-y-6">
       <div className="flex items-center justify-between">
         <button
-          onClick={() => navigate('/expenses')}
+          onClick={backToExpenses}
           className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -81,10 +119,10 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
 
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Calendar className="w-4 h-4" />
-          {format(parseISO(expense.date), 'EEEE, MMM dd, yyyy')}
-          {expense.createdAt && (
+          {formattedExpenseDate}
+          {createdAtLabel && (
             <span className="ml-auto text-xs text-slate-400">
-              added {format(new Date(expense.createdAt), 'hh:mm a')}
+              added {createdAtLabel}
             </span>
           )}
         </div>
@@ -99,14 +137,14 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
           </div>
         </div>
 
-        {(expense.participants && expense.participants.length > 0) && (
+        {participants.length > 0 && (
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
               <Users className="w-3 h-3" />
-              Split between · {expense.participants.length} people
+              Split between · {participants.length} people
             </p>
             <div className="flex flex-wrap gap-2">
-              {expense.participants.map((person) => (
+              {participants.map((person) => (
                 <span
                   key={person}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border ${
@@ -125,9 +163,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
                 </span>
               ))}
             </div>
-            <p className="text-[10px] text-slate-400 mt-2">
-              ₹{(expense.amount / expense.participants.length).toFixed(0)} each
-            </p>
+            {splitPerPerson && <p className="text-[10px] text-slate-400 mt-2">{splitPerPerson}</p>}
           </div>
         )}
 
@@ -138,11 +174,11 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
           </div>
         )}
 
-        {(expense.tags || []).length > 0 && (
+        {tags.length > 0 && (
           <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Tags</p>
             <div className="flex flex-wrap gap-2">
-              {(expense.tags || []).map((tag) => (
+              {tags.map((tag) => (
                 <span key={`${expense.id}-${tag}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
                   <Tag className="w-3 h-3" />
                   {tag}
@@ -174,7 +210,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
 
       <div className="grid grid-cols-2 gap-3">
         <button
-          onClick={() => navigate(`/edit/${expense.id}`)}
+          onClick={goToEdit}
           disabled={Boolean(isLocked)}
           className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold inline-flex items-center justify-center gap-2"
         >

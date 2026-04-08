@@ -32,11 +32,26 @@ export interface Expense {
   ocrText?: string;
   isAiCategorized?: boolean;
   createdAt?: string; // ISO timestamp — set on creation, not on edit
+  updatedAt?: string; // ISO timestamp — set on creation and edit
 }
 
 export interface TripData {
   setup: TripSetup | null;
   expenses: Expense[];
+  deletedExpenseMap?: Record<string, string>; // expenseId -> deletedAt ISO
+}
+
+export interface Trip {
+  id: string;
+  name: string;
+  createdAt: string; // ISO timestamp
+  updatedAt?: string; // ISO timestamp
+  data: TripData;
+}
+
+export interface TripsContainer {
+  trips: Trip[];
+  activeTrip: string | null;
 }
 
 export interface SettlementTransfer {
@@ -75,89 +90,123 @@ export const getTripCategories = (setup: TripSetup | null): string[] => {
 };
 
 const toRounded = (value: number) => Math.round(value * 100) / 100;
+const EPSILON = 0.01;
 
 const getShareMap = (expense: Expense, peopleInExpense: string[]): Record<string, number> => {
   if (peopleInExpense.length === 0) return {};
 
   if (expense.splitType === 'custom' && expense.splitMap) {
-    return peopleInExpense.reduce((acc, person) => {
-      const value = Number(expense.splitMap?.[person] || 0);
+    const customMap = expense.splitMap;
+    const acc: Record<string, number> = {};
+    for (const person of peopleInExpense) {
+      const value = Number(customMap[person] || 0);
       if (value > 0) acc[person] = value;
-      return acc;
-    }, {} as Record<string, number>);
+    }
+    return acc;
   }
 
   const split = expense.amount / peopleInExpense.length;
-  return peopleInExpense.reduce((acc, person) => {
+  const acc: Record<string, number> = {};
+  for (const person of peopleInExpense) {
     acc[person] = split;
-    return acc;
-  }, {} as Record<string, number>);
+  }
+  return acc;
 };
 
-export const calculateSettlement = (setup: TripSetup | null, expenses: Expense[]): SettlementSummary => {
+export const calculateSettlement = (
+  setup: TripSetup | null,
+  expenses: Expense[]
+): SettlementSummary => {
+
+  if (!setup) {
+    return { balances: {}, transfers: [], totalToSettle: 0 };
+  }
+
   const people = getTripPeople(setup);
-  const balances = people.reduce((acc, person) => {
-    acc[person] = 0;
-    return acc;
-  }, {} as Record<string, number>);
+  const balances: Record<string, number> = {};
 
-  expenses.forEach((expense) => {
-    const participants = expense.participants && expense.participants.length > 0
-      ? expense.participants
-      : people;
+  for (let i = 0; i < people.length; i++) {
+    balances[people[i]] = 0;
+  }
 
-    if (!expense.paidBy || !Object.prototype.hasOwnProperty.call(balances, expense.paidBy)) {
-      return;
-    }
+  for (let i = 0; i < expenses.length; i++) {
+    const expense = expenses[i];
 
-    balances[expense.paidBy] += expense.amount;
+    const payer = expense.paidBy;
+    if (!payer || balances[payer] === undefined) continue;
+
+    const participants =
+      expense.participants && expense.participants.length > 0
+        ? expense.participants
+        : people;
+
+    balances[payer] += expense.amount;
 
     const shareMap = getShareMap(expense, participants);
-    Object.entries(shareMap).forEach(([person, share]) => {
-      if (Object.prototype.hasOwnProperty.call(balances, person)) {
-        balances[person] -= share;
+
+    for (const person in shareMap) {
+      if (balances[person] !== undefined) {
+        balances[person] -= shareMap[person];
       }
-    });
-  });
+    }
+  }
 
-  const debtors = Object.entries(balances)
-    .filter(([, amount]) => amount < -0.01)
-    .map(([person, amount]) => ({ person, amount: Math.abs(amount) }))
-    .sort((a, b) => b.amount - a.amount);
+  const debtors: { person: string; amount: number }[] = [];
+  const creditors: { person: string; amount: number }[] = [];
 
-  const creditors = Object.entries(balances)
-    .filter(([, amount]) => amount > 0.01)
-    .map(([person, amount]) => ({ person, amount }))
-    .sort((a, b) => b.amount - a.amount);
+  for (const person in balances) {
+    const amount = balances[person];
+
+    if (amount < -EPSILON) {
+      debtors.push({ person, amount: -amount });
+    } else if (amount > EPSILON) {
+      creditors.push({ person, amount });
+    }
+  }
+
+  debtors.sort((a, b) => b.amount - a.amount);
+  creditors.sort((a, b) => b.amount - a.amount);
 
   const transfers: SettlementTransfer[] = [];
-  let debtorIndex = 0;
-  let creditorIndex = 0;
 
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const debtor = debtors[debtorIndex];
-    const creditor = creditors[creditorIndex];
-    const transfer = Math.min(debtor.amount, creditor.amount);
+  let d = 0;
+  let c = 0;
 
-    if (transfer > 0.01) {
+  while (d < debtors.length && c < creditors.length) {
+    const debtor = debtors[d];
+    const creditor = creditors[c];
+
+    const amount = Math.min(debtor.amount, creditor.amount);
+
+    if (amount > EPSILON) {
       transfers.push({
         from: debtor.person,
         to: creditor.person,
-        amount: toRounded(transfer)
+        amount: toRounded(amount)
       });
     }
 
-    debtor.amount = toRounded(debtor.amount - transfer);
-    creditor.amount = toRounded(creditor.amount - transfer);
+    debtor.amount = toRounded(debtor.amount - amount);
+    creditor.amount = toRounded(creditor.amount - amount);
 
-    if (debtor.amount <= 0.01) debtorIndex += 1;
-    if (creditor.amount <= 0.01) creditorIndex += 1;
+    if (debtor.amount <= EPSILON) d++;
+    if (creditor.amount <= EPSILON) c++;
+  }
+
+  let total = 0;
+  for (let i = 0; i < transfers.length; i++) {
+    total += transfers[i].amount;
+  }
+
+  const roundedBalances: Record<string, number> = {};
+  for (const k in balances) {
+    roundedBalances[k] = toRounded(balances[k]);
   }
 
   return {
-    balances: Object.fromEntries(Object.entries(balances).map(([k, v]) => [k, toRounded(v)])),
+    balances: roundedBalances,
     transfers,
-    totalToSettle: toRounded(transfers.reduce((sum, transfer) => sum + transfer.amount, 0))
+    totalToSettle: toRounded(total)
   };
 };
 
@@ -165,15 +214,15 @@ export const calculateStats = (tripData: TripData) => {
   const { setup, expenses } = tripData;
   if (!setup) return null;
 
-  // Single pass — compute total, today, yesterday simultaneously
   let totalSpent = 0;
   let todaySpent = 0;
   let yesterdaySpent = 0;
 
   for (const exp of expenses) {
     totalSpent += exp.amount;
-    if (isToday(parseISO(exp.date))) todaySpent += exp.amount;
-    else if (isYesterday(parseISO(exp.date))) yesterdaySpent += exp.amount;
+    const expenseDate = parseISO(exp.date);
+    if (isToday(expenseDate)) todaySpent += exp.amount;
+    else if (isYesterday(expenseDate)) yesterdaySpent += exp.amount;
   }
 
   const remainingBalance = setup.totalBudget - totalSpent;
@@ -188,7 +237,6 @@ export const calculateStats = (tripData: TripData) => {
   const hasStarted = today >= tripStart;
   const hasEnded = today > tripEnd;
 
-  // Active trip window only; pre-trip should not distort burn-rate warnings.
   const daysPassed = hasStarted ? Math.max(1, differenceInDays(today, tripStart) + 1) : 0;
   const daysRemaining = hasEnded
     ? 0
@@ -236,6 +284,6 @@ export const calculateStats = (tripData: TripData) => {
     daysRemaining,
     statusColor,
     bgColor,
-    borderColor
+    borderColor,
   };
 };

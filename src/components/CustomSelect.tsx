@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -27,28 +27,42 @@ export function CustomSelect<T extends string = string>({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const selected = options.find(o => o.value === value);
+  const selected = useMemo(() => options.find(o => o.value === value), [options, value]);
+
+  const accent = useMemo(() => (
+    accentColor === 'emerald'
+      ? { ring: 'ring-emerald-500 border-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700', check: 'text-emerald-600' }
+      : { ring: 'ring-blue-500 border-blue-500', bg: 'bg-blue-50', text: 'text-blue-700', check: 'text-blue-600' }
+  ), [accentColor]);
+
+  const closeMenu = useCallback(() => {
+    setOpen(false);
+  }, []);
+
+  const toggleMenu = useCallback(() => {
+    setOpen(prev => !prev);
+  }, []);
 
   const handleSelect = useCallback((val: T) => {
     onChange(val);
     setOpen(false);
   }, [onChange]);
 
+  const handleOptionClick = useCallback((val: T) => {
+    handleSelect(val);
+  }, [handleSelect]);
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        closeMenu();
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const accent = accentColor === 'emerald'
-    ? { ring: 'ring-emerald-500 border-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700', check: 'text-emerald-600' }
-    : { ring: 'ring-blue-500 border-blue-500', bg: 'bg-blue-50', text: 'text-blue-700', check: 'text-blue-600' };
+  }, [closeMenu, open]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -56,7 +70,7 @@ export function CustomSelect<T extends string = string>({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleMenu}
         className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
           open
             ? `ring-2 ring-inset ${accent.ring} ${accent.bg} ${accent.text}`
@@ -90,7 +104,7 @@ export function CustomSelect<T extends string = string>({
                   {idx > 0 && <div className="h-px bg-slate-50 mx-3" />}
                   <button
                     type="button"
-                    onClick={() => handleSelect(option.value)}
+                    onClick={() => handleOptionClick(option.value)}
                     className={`w-full px-4 py-3 text-sm font-semibold text-left flex items-center justify-between gap-2 transition-colors ${
                       isSelected
                         ? `${accent.bg} ${accent.text}`

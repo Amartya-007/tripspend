@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Check, UserCircle2 } from 'lucide-react';
 import { TripSetup } from '../utils/calculations.ts';
@@ -26,11 +26,36 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
 
   if (!setup) return null;
 
-  const members = setup.participants || [];
+  const members = useMemo(() => setup.participants || [], [setup.participants]);
+  const trimmedNewMember = useMemo(() => newMember.trim(), [newMember]);
+  const memberSet = useMemo(() => new Set(members), [members]);
+  const canAddMember = useMemo(() => Boolean(trimmedNewMember) && !memberSet.has(trimmedNewMember), [trimmedNewMember, memberSet]);
 
   const commit = useCallback((participants: string[]) => {
+    if (
+      participants.length === members.length
+      && participants.every((name, idx) => name === members[idx])
+    ) {
+      return;
+    }
     onUpdate({ ...setup, participants, peopleCount: participants.length });
-  }, [setup, onUpdate]);
+  }, [setup, onUpdate, members]);
+
+  const goBack = useCallback(() => {
+    navigate('/settings');
+  }, [navigate]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingIdx(null);
+  }, []);
+
+  const handleEditNameChange = useCallback((value: string) => {
+    setEditName(value);
+  }, []);
+
+  const handleNewMemberChange = useCallback((value: string) => {
+    setNewMember(value);
+  }, []);
 
   const openEdit = useCallback((idx: number, name: string) => {
     setEditingIdx(idx);
@@ -40,6 +65,10 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
   const saveEdit = useCallback((idx: number) => {
     const trimmed = editName.trim();
     if (!trimmed) return;
+    if (members[idx] === trimmed) {
+      setEditingIdx(null);
+      return;
+    }
     const updated = [...members];
     updated[idx] = trimmed;
     commit(updated);
@@ -53,16 +82,15 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
   }, [members, commit, editingIdx]);
 
   const addMember = useCallback(() => {
-    const trimmed = newMember.trim();
-    if (!trimmed || members.includes(trimmed)) return;
-    commit([...members, trimmed]);
+    if (!canAddMember) return;
+    commit([...members, trimmedNewMember]);
     setNewMember('');
-  }, [newMember, members, commit]);
+  }, [canAddMember, members, commit, trimmedNewMember]);
 
   return (
     <div className="page-shell space-y-6">
       <div className="flex items-center gap-3 page-header">
-        <button onClick={() => navigate('/settings')} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors -ml-1">
+        <button onClick={goBack} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors -ml-1">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
@@ -96,7 +124,7 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
                       <input
                         type="text"
                         value={editName}
-                        onChange={e => setEditName(e.target.value)}
+                        onChange={e => handleEditNameChange(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && saveEdit(idx)}
                         placeholder="Name"
                         autoFocus
@@ -104,7 +132,7 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => setEditingIdx(null)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold">
+                      <button onClick={cancelEdit} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold">
                         Cancel
                       </button>
                       <button onClick={() => saveEdit(idx)} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold flex items-center justify-center gap-1.5">
@@ -142,7 +170,7 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
           <input
             type="text"
             value={newMember}
-            onChange={e => setNewMember(e.target.value)}
+            onChange={e => handleNewMemberChange(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && addMember()}
             placeholder="Add new member..."
             className="input-field pl-10 text-sm"
@@ -150,7 +178,7 @@ export const GroupMemberManager: React.FC<GroupMemberManagerProps> = ({ setup, o
         </div>
         <button
           onClick={addMember}
-          disabled={!newMember.trim() || members.includes(newMember.trim())}
+          disabled={!canAddMember}
           className="w-12 h-12 bg-blue-600 disabled:bg-slate-200 text-white rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors"
         >
           <Plus className="w-5 h-5" />

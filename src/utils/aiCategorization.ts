@@ -2,6 +2,9 @@ import { GoogleGenAI } from '@google/genai';
 
 type AIResult = { category: string; confidence: number; reasoning: string };
 
+let cachedClient: GoogleGenAI | null = null;
+let cachedApiKey = '';
+
 const getApiKey = () => {
   const env = import.meta.env as { VITE_GEMINI_API_KEY?: string };
   return env.VITE_GEMINI_API_KEY || '';
@@ -10,7 +13,14 @@ const getApiKey = () => {
 const getClient = () => {
   const apiKey = getApiKey();
   if (!apiKey) return null;
-  return new GoogleGenAI({ apiKey });
+
+  if (cachedClient && cachedApiKey === apiKey) {
+    return cachedClient;
+  }
+
+  cachedApiKey = apiKey;
+  cachedClient = new GoogleGenAI({ apiKey });
+  return cachedClient;
 };
 
 const parseJsonFromText = <T>(text: string): T | null => {
@@ -31,6 +41,9 @@ export const categorizeExpenseWithAI = async (
   const client = getClient();
   if (!client) return null;
 
+  const categoriesSet = new Set(availableCategories);
+  if (!categoriesSet.size) return null;
+
   const prompt = [
     'You are an expense categorizer.',
     `Pick exactly one category from: ${availableCategories.join(', ')}`,
@@ -50,7 +63,7 @@ export const categorizeExpenseWithAI = async (
     const parsed = parseJsonFromText<AIResult>(text);
     if (!parsed) return null;
 
-    if (!availableCategories.includes(parsed.category)) {
+    if (!categoriesSet.has(parsed.category)) {
       return null;
     }
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Edit3, Check } from 'lucide-react';
 import { TripSetup } from '../utils/calculations.ts';
@@ -26,46 +26,76 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
     );
   }
 
-  const handleAddCategory = () => {
-    if (newCategory.trim() && !categories.includes(newCategory.trim())) {
-      setCategories([...categories, newCategory.trim()]);
+  useEffect(() => {
+    const next = setup.customCategories || ['Food', 'Travel', 'Stay', 'Misc'];
+    setCategories(next);
+  }, [setup.customCategories]);
+
+  const trimmedNewCategory = useMemo(() => newCategory.trim(), [newCategory]);
+  const trimmedEditValue = useMemo(() => editValue.trim(), [editValue]);
+  const categoriesSet = useMemo(() => new Set(categories), [categories]);
+
+  const canAddCategory = useMemo(
+    () => Boolean(trimmedNewCategory) && !categoriesSet.has(trimmedNewCategory),
+    [trimmedNewCategory, categoriesSet]
+  );
+
+  const goBack = useCallback(() => {
+    navigate('/settings');
+  }, [navigate]);
+
+  const handleAddCategory = useCallback(() => {
+    if (canAddCategory) {
+      setCategories([...categories, trimmedNewCategory]);
       setNewCategory('');
     }
-  };
+  }, [canAddCategory, categories, trimmedNewCategory]);
 
-  const handleEditCategory = (idx: number) => {
+  const handleEditCategory = useCallback((idx: number) => {
     setEditingIdx(idx);
     setEditValue(categories[idx]);
-  };
+  }, [categories]);
 
-  const handleSaveEdit = (idx: number) => {
-    if (editValue.trim() && !categories.includes(editValue.trim())) {
+  const handleSaveEdit = useCallback((idx: number) => {
+    const isDuplicateElsewhere = categories.some((category, categoryIdx) => categoryIdx !== idx && category === trimmedEditValue);
+    if (trimmedEditValue && !isDuplicateElsewhere) {
       const updated = [...categories];
-      updated[idx] = editValue.trim();
+      updated[idx] = trimmedEditValue;
       setCategories(updated);
       setEditingIdx(null);
     }
-  };
+  }, [categories, trimmedEditValue]);
 
-  const handleDeleteCategory = (idx: number) => {
+  const handleDeleteCategory = useCallback((idx: number) => {
     if (categories.length > 1) {
       setCategories(categories.filter((_, i) => i !== idx));
+      if (editingIdx === idx) {
+        setEditingIdx(null);
+      }
     }
-  };
+  }, [categories, editingIdx]);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     onUpdate({
       ...setup,
       customCategories: categories.filter(c => c.trim()),
     });
     navigate('/settings');
-  };
+  }, [categories, navigate, onUpdate, setup]);
+
+  const handleEditValueChange = useCallback((value: string) => {
+    setEditValue(value);
+  }, []);
+
+  const handleNewCategoryChange = useCallback((value: string) => {
+    setNewCategory(value);
+  }, []);
 
   return (
     <div className="page-shell space-y-6">
       <div className="flex items-center justify-between page-header">
         <button
-          onClick={() => navigate('/settings')}
+          onClick={goBack}
           className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -90,7 +120,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
                   <input
                     type="text"
                     value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
+                    onChange={(e) => handleEditValueChange(e.target.value)}
                     className="flex-1 input-field text-sm"
                     autoFocus
                   />
@@ -131,14 +161,15 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
         <input
           type="text"
           value={newCategory}
-          onChange={(e) => setNewCategory(e.target.value)}
+          onChange={(e) => handleNewCategoryChange(e.target.value)}
           placeholder="Add new category..."
-          onKeyPress={(e) => e.key === 'Enter' && handleAddCategory()}
+          onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
           className="input-field flex-1 text-sm"
         />
         <button
           onClick={handleAddCategory}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          disabled={!canAddCategory}
+          className="px-4 py-2 bg-blue-600 disabled:bg-slate-200 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
         </button>

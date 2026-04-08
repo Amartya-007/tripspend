@@ -3,14 +3,16 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Expense, TripSetup, getTripCategories, getTripPeople } from '../utils/calculations.ts';
 import { categorizeExpenseWithAI, isAIConfigured } from '../utils/aiCategorization.ts';
 import { formatCurrency } from '../utils/cn';
-import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic, User, Users, ChevronDown } from 'lucide-react';
+import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic, User, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DatePicker } from '../components/DatePicker.tsx';
-import { CustomSelect } from '../components/CustomSelect.tsx';
+import { PeoplePickerSheet } from '../components/PeoplePickerSheet.tsx';
 import { format, isBefore, isValid, parseISO, startOfDay } from 'date-fns';
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
+
+const QUICK_AMOUNTS = [50, 100, 200, 500];
 
 interface AddExpenseProps {
   onAdd: (expense: Expense) => void;
@@ -168,7 +170,35 @@ type SpeechRecognitionCtor = new () => {
   start: () => void;
 };
 
-// Multi-select dropdown for split participants
+const PaidBySelect: React.FC<{
+  people: string[];
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}> = ({ people, value, disabled, onChange }) => {
+  const selected = useMemo(() => (value ? [value] : []), [value]);
+
+  const handleChange = useCallback((next: string[]) => {
+    if (!next[0]) return;
+    onChange(next[0]);
+  }, [onChange]);
+
+  return (
+    <PeoplePickerSheet
+      people={people}
+      selected={selected}
+      onChange={handleChange}
+      mode="single"
+      disabled={disabled}
+      triggerLabel={value || 'Select payer'}
+      title="Paid By"
+      subtitle="Pick who paid this expense"
+      accent="emerald"
+      showSelectedSummary={false}
+    />
+  );
+};
+
 const SplitSelect: React.FC<{
   people: string[];
   selected: string[];
@@ -176,87 +206,33 @@ const SplitSelect: React.FC<{
   disabled: boolean;
   onChange: (v: string[]) => void;
 }> = ({ people, selected, paidBy, disabled, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const toggle = (person: string) => {
-    onChange(
-      selected.includes(person)
-        ? selected.length > 1 ? selected.filter(p => p !== person) : selected
-        : [...selected, person]
-    );
-  };
-
   const label = selected.length === people.length
     ? 'Everyone'
+    : selected.length === 0
+    ? 'No one selected'
     : selected.length === 1
     ? selected[0]
     : `${selected.length} people`;
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(o => !o)}
-        className={`w-full px-4 py-3 rounded-xl border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
-          open ? 'ring-2 ring-inset ring-blue-500 border-blue-500 text-blue-700 bg-blue-50'
-               : 'border-slate-200 text-slate-700 hover:border-slate-300'
-        }`}
-      >
-        <span className="truncate">{label}</span>
-        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }} className="flex-shrink-0">
-          <ChevronDown className="w-4 h-4 text-slate-400" />
-        </motion.span>
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.97 }}
-            transition={{ duration: 0.13 }}
-            className="absolute z-50 top-full mt-1.5 left-0 right-0 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden"
-          >
-            {people.map((person, idx) => {
-              const isSelected = selected.includes(person);
-              return (
-                <React.Fragment key={person}>
-                  {idx > 0 && <div className="h-px bg-slate-50 mx-4" />}
-                  <button
-                    type="button"
-                    onClick={() => toggle(person)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors"
-                  >
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                      isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300'
-                    }`}>
-                      {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
-                    </div>
-                    <span className={`text-sm font-semibold flex-1 text-left ${isSelected ? 'text-slate-900' : 'text-slate-400'}`}>
-                      {person}
-                    </span>
-                    {person === paidBy && (
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">paid</span>
-                    )}
-                  </button>
-                </React.Fragment>
-              );
-            })}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    <PeoplePickerSheet
+      people={people}
+      selected={selected}
+      onChange={onChange}
+      mode="multiple"
+      disabled={disabled}
+      triggerLabel={label}
+      title="Split Between"
+      subtitle={`${selected.length} of ${people.length} selected`}
+      accent="blue"
+      paidBy={paidBy}
+      showPayerBadge
+      showPayerWarning
+      showSelectAllAction
+      showClearAllAction
+      showOnlyPayerAction
+      showSelectedSummary
+    />
   );
 };
 
@@ -321,7 +297,13 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const [searchParams] = useSearchParams();
   const isEditing = !!id;
 
-  const people = getTripPeople(setup);
+  const people = useMemo(() => getTripPeople(setup), [setup]);
+  const categories = useMemo(() => getTripCategories(setup), [setup]);
+  const dailyLimit = useMemo(
+    () => (setup ? (setup.totalBudget / Math.max(1, setup.peopleCount)) : 0),
+    [setup]
+  );
+  const paidByPeople = useMemo(() => (people.length > 0 ? people : ['Trip Wallet']), [people]);
 
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<Expense['category']>('Food');
@@ -354,7 +336,24 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         setReceipts((expense.receipts && expense.receipts.length > 0) ? expense.receipts : legacyReceipts);
       }
     }
-  }, [id, isEditing, expenses]);
+  }, [id, isEditing, expenses, people]);
+
+  useEffect(() => {
+    if (isEditing) return;
+
+    if (people.length === 0) {
+      setPaidBy('Trip Wallet');
+      setSplitWith([]);
+      return;
+    }
+
+    setPaidBy((prev) => (people.includes(prev) ? prev : people[0]));
+    setSplitWith((prev) => {
+      if (prev.length === 0) return people;
+      const filtered = prev.filter((person) => people.includes(person));
+      return filtered.length > 0 ? filtered : people;
+    });
+  }, [isEditing, people]);
 
   useEffect(() => {
     if (isEditing) return;
@@ -380,10 +379,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       }
     }
   }, [isEditing, searchParams]);
-
-  const categories = useMemo(() => getTripCategories(setup), [setup]);
-  const quickAmounts = [50, 100, 200, 500];
-  const dailyLimit = setup ? (setup.totalBudget / Math.max(1, setup.peopleCount)) : 0;
 
   // Smart category suggestion when note changes
   const handleNoteChange = useCallback((value: string) => {
@@ -450,6 +445,16 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     setShowLargeExpenseConfirm(false);
     navigate('/expenses');
   }, [pendingExpense, isEditing, onUpdate, onAdd, navigate]);
+
+  const clearDuplicateWarning = useCallback(() => {
+    setShowDuplicateWarning(null);
+    setPendingExpense(null);
+  }, []);
+
+  const clearLargeExpenseWarning = useCallback(() => {
+    setShowLargeExpenseConfirm(false);
+    setPendingExpense(null);
+  }, []);
 
   const handleQuickAmount = useCallback((val: number) => {
     setAmount(prev => (parseFloat(prev) || 0) + val + '');
@@ -610,7 +615,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             className="w-full px-4 py-4 text-2xl font-bold rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-50"
           />
           <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-            {quickAmounts.map(val => (
+            {QUICK_AMOUNTS.map(val => (
               <button
                 key={val}
                 type="button"
@@ -645,13 +650,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             <User className="w-4 h-4 text-slate-400" />
             Paid by
           </label>
-          <CustomSelect
-            value={paidBy}
-            options={(people.length > 0 ? people : ['Trip Wallet']).map(p => ({ value: p, label: p }))}
-            onChange={setPaidBy}
-            disabled={Boolean(isLocked)}
-            accentColor="emerald"
-          />
+          <PaidBySelect people={paidByPeople} value={paidBy} onChange={setPaidBy} disabled={Boolean(isLocked)} />
         </div>
 
         {people.length > 1 && (
@@ -668,10 +667,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
               disabled={Boolean(isLocked)}
               onChange={setSplitWith}
             />
-            <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => setSplitWith([...people])} className="text-xs text-blue-600 font-semibold px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors">Select all</button>
-              <button type="button" onClick={() => setSplitWith(paidBy ? [paidBy] : [people[0]])} className="text-xs text-slate-500 font-semibold px-2 py-1 rounded-lg hover:bg-slate-100 transition-colors">Only payer</button>
-            </div>
           </div>
         )}
 
@@ -805,7 +800,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         {showDuplicateWarning && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-[70]" onClick={() => setShowDuplicateWarning(null)} />
+              className="fixed inset-0 bg-black/40 z-[70]" onClick={clearDuplicateWarning} />
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 300 }}
@@ -830,7 +825,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
                 {showDuplicateWarning.note && ` · ${showDuplicateWarning.note}`}
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setShowDuplicateWarning(null)}
+                <button onClick={clearDuplicateWarning}
                   className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm">
                   Cancel
                 </button>
@@ -849,7 +844,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         {showLargeExpenseConfirm && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-[70]" onClick={() => setShowLargeExpenseConfirm(false)} />
+              className="fixed inset-0 bg-black/40 z-[70]" onClick={clearLargeExpenseWarning} />
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 300 }}
@@ -871,7 +866,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => setShowLargeExpenseConfirm(false)}
+                <button onClick={clearLargeExpenseWarning}
                   className="py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold text-sm">
                   Cancel
                 </button>

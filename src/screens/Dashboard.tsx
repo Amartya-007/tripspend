@@ -6,19 +6,34 @@ import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { differenceInDays, parseISO, startOfDay } from 'date-fns';
 
+// Motion animation configurations
+const MOTION_VARIANTS = {
+  fadeSlideDown: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } },
+  fadeSlideUp: { initial: { opacity: 0, y: 15 }, animate: { opacity: 1, y: 0 } },
+  fadeScale: { initial: { opacity: 0, scale: 0.95 }, animate: { opacity: 1, scale: 1 } },
+};
+
+const ANIMATION_DELAYS = {
+  balance: 0.05,
+  today: 0.1,
+  yesterday: 0.15,
+  dailyLimit: 0.2,
+  analyticsCta: 0.25,
+};
+
 interface DashboardProps {
   data: TripData;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   const stats = useMemo(() => calculateStats(data), [data]);
+  const todayDate = useMemo(() => startOfDay(new Date()), []);
   const daysUntilStart = useMemo(() => {
     if (!data.setup?.startDate) return 0;
-    const today = startOfDay(new Date());
     const start = startOfDay(parseISO(data.setup.startDate));
-    return differenceInDays(start, today);
-  }, [data.setup?.startDate]);
-  const isPreTrip = daysUntilStart > 0;
+    return differenceInDays(start, todayDate);
+  }, [data.setup?.startDate, todayDate]);
+  const isPreTrip = useMemo(() => daysUntilStart > 0, [daysUntilStart]);
 
   if (!stats || !data.setup) return null;
 
@@ -57,16 +72,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   useEffect(() => {
     if (!stats.isOverspending) return;
     if (typeof Notification === 'undefined') return;
-    const today = new Date().toISOString().split('T')[0];
+    const dateStr = todayDate.toISOString().split('T')[0];
     const key = 'tripspend_overspend_alert_date';
-    if (localStorage.getItem(key) === today) return;
+    if (localStorage.getItem(key) === dateStr) return;
     const notify = () => {
       new Notification('TripSpend Alert', { body: `At current pace, you may overshoot by ${formatCurrency(stats.projectedDeficit)}.` });
-      localStorage.setItem(key, today);
+      localStorage.setItem(key, dateStr);
     };
     if (Notification.permission === 'granted') notify();
     else if (Notification.permission === 'default') Notification.requestPermission().then(p => p === 'granted' && notify());
-  }, [stats.isOverspending, stats.projectedDeficit]);
+  }, [stats.isOverspending, stats.projectedDeficit, todayDate]);
 
   return (
     <div className="page-shell space-y-5">
@@ -82,7 +97,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       </div>
 
       {/* Trip snapshot */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      <motion.div {...MOTION_VARIANTS.fadeSlideDown}
         className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-3xl p-5 text-white shadow-xl shadow-blue-200">
         <p className="text-blue-200 text-xs font-bold uppercase tracking-widest mb-3">Current Trip</p>
         {isPreTrip && (
@@ -103,7 +118,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
       {/* Overspend alert */}
       {stats.isOverspending && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        <motion.div {...MOTION_VARIANTS.fadeSlideDown}
           className="bg-gradient-to-r from-red-50 to-rose-50 border border-red-200 p-4 rounded-3xl">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
@@ -118,7 +133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       )}
 
       {/* Remaining balance */}
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.05 }}
+      <motion.div {...MOTION_VARIANTS.fadeScale} transition={{ delay: ANIMATION_DELAYS.balance }}
         className={`p-6 rounded-3xl border-2 ${stats.borderColor} ${stats.bgColor} shadow-sm`}>
         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Remaining Balance</p>
         <h2 className={`text-5xl font-black ${stats.statusColor} mb-4`}>{formatCurrency(stats.remainingBalance)}</h2>
@@ -136,7 +151,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
       {/* Today / Yesterday */}
       <div className="grid grid-cols-2 gap-4">
-        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="card-elevated p-5">
+        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.today }} className="card-elevated p-5">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
               <Clock className="w-4 h-4 text-blue-600" />
@@ -145,7 +160,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
           </div>
           <p className="text-2xl font-black text-slate-900">{formatCurrency(stats.todaySpent)}</p>
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="card-elevated p-5">
+        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.yesterday }} className="card-elevated p-5">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center">
               <Clock className="w-4 h-4 text-slate-400" />
@@ -157,7 +172,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       </div>
 
       {/* Safe daily limit — single most useful number */}
-      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.dailyLimit }}
         className="bg-gradient-to-br from-blue-600 to-blue-700 p-5 rounded-3xl text-white shadow-xl shadow-blue-200">
         <div className="flex items-center gap-2 mb-4">
           <div className="p-1.5 bg-blue-500/30 rounded-lg">
@@ -178,7 +193,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       </motion.div>
 
       {/* Analytics CTA */}
-      <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+      <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.analyticsCta }}>
         <Link
           to="/analytics"
           className="flex items-center justify-between p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-3xl group hover:shadow-md transition-all"

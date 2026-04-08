@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, isSameMonth, isToday, parseISO } from 'date-fns';
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, isSameMonth, isToday, parseISO, isBefore, isAfter, startOfDay } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { createPortal } from 'react-dom';
 
@@ -9,17 +9,29 @@ interface DatePickerProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   compact?: boolean;
+  minDate?: string; // yyyy-MM-dd
+  maxDate?: string; // yyyy-MM-dd
 }
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const SWIPE_THRESHOLD = 50;
 
-export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disabled, compact = false }) => {
+export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disabled, compact = false, minDate, maxDate }) => {
   const selected = useMemo(() => value ? parseISO(value) : new Date(), [value]);
+  const minDateValue = useMemo(() => (minDate ? startOfDay(parseISO(minDate)) : null), [minDate]);
+  const maxDateValue = useMemo(() => (maxDate ? startOfDay(parseISO(maxDate)) : null), [maxDate]);
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(selected));
   const [open, setOpen] = useState(false);
   const [direction, setDirection] = useState(1);
   const touchStartX = useRef<number | null>(null);
+  const selectedLabel = useMemo(
+    () => format(selected, compact ? 'MMM d, yyyy' : 'EEE, MMM d, yyyy'),
+    [compact, selected]
+  );
+
+  useEffect(() => {
+    setViewMonth(startOfMonth(selected));
+  }, [selected]);
 
   const days = useMemo(() => {
     const start = startOfWeek(startOfMonth(viewMonth));
@@ -38,9 +50,20 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
   }, []);
 
   const handleSelect = useCallback((day: Date) => {
+    const normalizedDay = startOfDay(day);
+    if (minDateValue && isBefore(normalizedDay, minDateValue)) return;
+    if (maxDateValue && isAfter(normalizedDay, maxDateValue)) return;
     onChange(format(day, 'yyyy-MM-dd'));
     setOpen(false);
-  }, [onChange]);
+  }, [maxDateValue, minDateValue, onChange]);
+
+  const openPicker = useCallback(() => {
+    setOpen(true);
+  }, []);
+
+  const closePicker = useCallback(() => {
+    setOpen(false);
+  }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
@@ -64,7 +87,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/40 z-40"
-            onClick={() => setOpen(false)}
+            onClick={closePicker}
           />
 
           {/* Bottom sheet */}
@@ -126,13 +149,19 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
                     const isSelected = isSameDay(day, selected);
                     const isCurrentMonth = isSameMonth(day, viewMonth);
                     const isTodayDate = isToday(day);
+                    const normalizedDay = startOfDay(day);
+                    const isOutOfRange =
+                      (minDateValue && isBefore(normalizedDay, minDateValue))
+                      || (maxDateValue && isAfter(normalizedDay, maxDateValue));
                     return (
                       <button
                         key={day.toISOString()}
                         type="button"
+                        disabled={Boolean(isOutOfRange)}
                         onClick={() => handleSelect(day)}
                         className={`relative h-10 w-full rounded-xl text-sm font-semibold transition-all ${
-                          isSelected ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                          isOutOfRange ? 'text-slate-200 cursor-not-allowed'
+                          : isSelected ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
                           : isTodayDate ? 'bg-blue-50 text-blue-600 font-black'
                           : isCurrentMonth ? 'text-slate-700 active:bg-slate-100'
                           : 'text-slate-300'
@@ -153,7 +182,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
             <div className="grid grid-cols-2 gap-3 px-4 mt-4">
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={closePicker}
                 className="py-3 rounded-2xl bg-slate-100 text-slate-600 text-sm font-bold"
               >
                 Cancel
@@ -161,7 +190,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
               <button
                 type="button"
                 onClick={() => handleSelect(new Date())}
-                className="py-3 rounded-2xl bg-blue-600 text-white text-sm font-bold shadow-lg shadow-blue-100"
+                disabled={Boolean(
+                  (minDateValue && isBefore(startOfDay(new Date()), minDateValue))
+                  || (maxDateValue && isAfter(startOfDay(new Date()), maxDateValue))
+                )}
+                className="py-3 rounded-2xl bg-blue-600 disabled:bg-slate-200 text-white text-sm font-bold shadow-lg shadow-blue-100"
               >
                 Today
               </button>
@@ -178,13 +211,13 @@ export const DatePicker: React.FC<DatePickerProps> = ({ value, onChange, disable
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen(true)}
+        onClick={openPicker}
         className={`w-full px-4 ${compact ? 'py-2.5 rounded-xl' : 'py-3 rounded-xl'} border text-sm font-semibold text-left flex items-center justify-between gap-2 transition-all disabled:opacity-50 bg-white ${
           open ? 'border-blue-500 ring-2 ring-inset ring-blue-500 text-blue-700 bg-blue-50'
                : 'border-slate-200 text-slate-700 hover:border-slate-300'
         }`}
       >
-        <span>{format(selected, compact ? 'MMM d, yyyy' : 'EEE, MMM d, yyyy')}</span>
+        <span>{selectedLabel}</span>
         <Calendar className="w-4 h-4 text-slate-400 flex-shrink-0" />
       </button>
       {sheet}

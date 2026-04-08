@@ -12,6 +12,9 @@ export interface SettledTransfer {
 
 const STORAGE_KEY = 'tripspend_settled_v2';
 
+const roundAmount = (amount: number) => Math.round(amount * 100);
+const transferKey = (from: string, to: string, amount: number) => `${from}->${to}:${roundAmount(amount)}`;
+
 export const loadSettledTransfers = (): SettledTransfer[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -27,7 +30,7 @@ const save = (transfers: SettledTransfer[]) => {
 
 // Exact match: from + to + amount (rounded to 2dp to avoid float drift)
 const matches = (a: SettledTransfer, from: string, to: string, amount: number) =>
-  a.from === from && a.to === to && Math.round(a.amount * 100) === Math.round(amount * 100);
+  a.from === from && a.to === to && roundAmount(a.amount) === roundAmount(amount);
 
 export const isSettled = (settled: SettledTransfer[], from: string, to: string, amount: number) =>
   settled.some(s => matches(s, from, to, amount));
@@ -77,9 +80,15 @@ export const unmarkSettled = (settled: SettledTransfer[], from: string, to: stri
 
 // Remove stale entries — transfers that no longer exist in current calculation
 export const pruneStale = (settled: SettledTransfer[], currentTransfers: { from: string; to: string; amount: number }[]): SettledTransfer[] => {
-  const pruned = settled.filter(s =>
-    currentTransfers.some(t => matches(s, t.from, t.to, t.amount))
-  );
+  if (!settled.length) return settled;
+  if (!currentTransfers.length) {
+    if (settled.length) save([]);
+    return [];
+  }
+
+  const currentKeySet = new Set(currentTransfers.map(t => transferKey(t.from, t.to, t.amount)));
+  const pruned = settled.filter(s => currentKeySet.has(transferKey(s.from, s.to, s.amount)));
+
   if (pruned.length !== settled.length) save(pruned);
   return pruned;
 };

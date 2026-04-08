@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Expense, TripSetup, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
@@ -31,6 +31,11 @@ const CATEGORY_BG: Record<string, string> = {
   Stay: 'bg-purple-50',
 };
 const DEFAULT_BG = 'bg-slate-50';
+
+const sortDateMs = (date: string) => {
+  const parsed = parseISO(date);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
 
 const FlyoutSelect = ({
   label,
@@ -151,9 +156,82 @@ interface ExpenseListProps {
   canUndoDelete: boolean;
 }
 
+interface ExpenseRowProps {
+  expense: Expense;
+  onOpenExpense: (id: string) => void;
+}
+
+const ExpenseRow = React.memo(({ expense, onOpenExpense }: ExpenseRowProps) => {
+  const dateLabel = useMemo(() => format(new Date(expense.date), 'MMM dd, yyyy'), [expense.date]);
+  const addedTimeLabel = useMemo(() => formatAddedTime(expense.createdAt), [expense.createdAt]);
+  const shortTags = useMemo(() => (expense.tags || []).slice(0, 2), [expense.tags]);
+  const hasReceipt = Boolean((expense.receipts && expense.receipts.length > 0) || expense.receiptImage);
+  const hasMeta = shortTags.length > 0 || hasReceipt;
+
+  const handleOpen = useCallback(() => {
+    onOpenExpense(expense.id);
+  }, [onOpenExpense, expense.id]);
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="card-elevated p-5 flex items-center gap-4 cursor-pointer hover:shadow-lg hover:border-blue-200 hover:scale-105 transition-all duration-200"
+      onClick={handleOpen}
+    >
+      <div className={`w-12 h-12 ${CATEGORY_BG[expense.category] ?? DEFAULT_BG} rounded-2xl flex items-center justify-center flex-shrink-0 font-bold`}>
+        {CATEGORY_ICON[expense.category] ?? DEFAULT_ICON}
+      </div>
+
+      <div className="flex-grow min-w-0">
+        <div className="flex justify-between items-start gap-2">
+          <h3 className="font-bold text-slate-900 truncate text-base">
+            {expense.note || expense.category}
+          </h3>
+          <span className="font-black text-slate-900 whitespace-nowrap text-lg">
+            {formatCurrency(expense.amount)}
+          </span>
+        </div>
+        <div className="flex flex-col items-start gap-1.5 mt-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 min-w-0">
+            <Calendar className="w-3 h-3 flex-shrink-0" />
+            <span className="whitespace-nowrap">{dateLabel}</span>
+            <span className="text-slate-300 flex-shrink-0">•</span>
+            <span className="whitespace-nowrap">{addedTimeLabel}</span>
+          </div>
+          {expense.paidBy && expense.paidBy !== 'Trip Wallet' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px] flex-shrink-0">
+              <User className="w-2.5 h-2.5" />
+              {expense.paidBy}
+            </span>
+          )}
+        </div>
+        {hasMeta && (
+          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+            {shortTags.map((tag) => (
+              <span key={`${expense.id}-${tag}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-[10px] font-semibold text-blue-700">
+                <Tag className="w-2.5 h-2.5" />
+                {tag}
+              </span>
+            ))}
+            {hasReceipt && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-[10px] font-semibold text-amber-700">
+                <ImageIcon className="w-2.5 h-2.5" />
+                {(expense.receipts && expense.receipts.length > 0) ? `${expense.receipts.length} Receipts` : 'Receipt'}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+});
+
 export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUndoDelete, canUndoDelete }) => {
   const navigate = useNavigate();
-  const people = getTripPeople(setup);
+  const people = useMemo(() => getTripPeople(setup), [setup]);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [personFilter, setPersonFilter] = useState<string>('All');
   const [startDate, setStartDate] = useState('');
@@ -162,9 +240,23 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
   const [maxAmount, setMaxAmount] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'highest'>('newest');
 
+  const openFilters = useCallback(() => setShowFilters(true), []);
+  const closeFilters = useCallback(() => setShowFilters(false), []);
+  const toggleFilters = useCallback(() => setShowFilters((prev) => !prev), []);
+  const openAddExpense = useCallback(() => navigate('/add'), [navigate]);
+  const openExpense = useCallback((id: string) => navigate(`/expense/${id}`), [navigate]);
+
   const filteredExpenses = useMemo(() => {
+    const query = deferredSearchQuery.trim().toLowerCase();
+    const min = minAmount ? parseFloat(minAmount) : null;
+    const max = maxAmount ? parseFloat(maxAmount) : null;
+    const hasDateFilter = Boolean(startDate || endDate);
+    const start = startDate ? startOfDay(parseISO(startDate)) : new Date(0);
+    const end = endDate ? endOfDay(parseISO(endDate)) : new Date(8640000000000000);
+
     const base = expenses.filter(expense => {
       const matchesCategory = categoryFilter === 'All' || expense.category === categoryFilter;
       const matchesPerson = personFilter === 'All' ||
@@ -172,14 +264,11 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
         (expense.participants || []).includes(personFilter);
 
       let matchesDate = true;
-      if (startDate || endDate) {
+      if (hasDateFilter) {
         const expenseDate = parseISO(expense.date);
-        const start = startDate ? startOfDay(parseISO(startDate)) : new Date(0);
-        const end = endDate ? endOfDay(parseISO(endDate)) : new Date(8640000000000000);
         matchesDate = isWithinInterval(expenseDate, { start, end });
       }
 
-      const query = searchQuery.trim().toLowerCase();
       const searchable = [
         expense.note || '',
         expense.category,
@@ -189,8 +278,6 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
       ].join(' ').toLowerCase();
       const matchesSearch = query.length === 0 || searchable.includes(query);
 
-      const min = minAmount ? parseFloat(minAmount) : null;
-      const max = maxAmount ? parseFloat(maxAmount) : null;
       const matchesAmount = (min === null || expense.amount >= min) && (max === null || expense.amount <= max);
 
       return matchesCategory && matchesPerson && matchesDate && matchesSearch && matchesAmount;
@@ -201,18 +288,18 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
         return b.amount - a.amount;
       }
       if (sortBy === 'oldest') {
-        return parseISO(a.date).getTime() - parseISO(b.date).getTime();
+        return sortDateMs(a.date) - sortDateMs(b.date);
       }
-      return parseISO(b.date).getTime() - parseISO(a.date).getTime();
+      return sortDateMs(b.date) - sortDateMs(a.date);
     });
-  }, [expenses, categoryFilter, startDate, endDate, searchQuery, sortBy, personFilter, minAmount, maxAmount]);
+  }, [expenses, categoryFilter, startDate, endDate, deferredSearchQuery, sortBy, personFilter, minAmount, maxAmount]);
 
   const uniqueCategories = useMemo(
     () => ['All', ...Array.from(new Set(expenses.map(e => e.category)))],
     [expenses]
   );
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     setCategoryFilter('All');
     setPersonFilter('All');
     setStartDate('');
@@ -220,11 +307,14 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
     setMinAmount('');
     setMaxAmount('');
     setSearchQuery('');
-  };
+  }, []);
 
-  const isFiltered = categoryFilter !== 'All' || personFilter !== 'All' || startDate !== '' || endDate !== '' || searchQuery.trim() !== '' || minAmount !== '' || maxAmount !== '';
+  const isFiltered = useMemo(
+    () => categoryFilter !== 'All' || personFilter !== 'All' || startDate !== '' || endDate !== '' || searchQuery.trim() !== '' || minAmount !== '' || maxAmount !== '',
+    [categoryFilter, personFilter, startDate, endDate, searchQuery, minAmount, maxAmount]
+  );
 
-  const filtersPopup = createPortal(
+  const filtersPopup = useMemo(() => createPortal(
     <AnimatePresence>
       {showFilters && (
         <>
@@ -233,7 +323,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/40 z-40"
-            onClick={() => setShowFilters(false)}
+            onClick={closeFilters}
           />
           <motion.div
             initial={{ y: '100%' }}
@@ -254,7 +344,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
               </div>
               <button
                 type="button"
-                onClick={() => setShowFilters(false)}
+                onClick={closeFilters}
                 className="p-2 rounded-xl hover:bg-slate-100 text-slate-400"
               >
                 <X className="w-5 h-5" />
@@ -360,7 +450,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowFilters(false)}
+                  onClick={closeFilters}
                   className="py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl"
                 >
                   Apply
@@ -372,7 +462,19 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
       )}
     </AnimatePresence>,
     document.body
-  );
+  ), [
+    showFilters,
+    closeFilters,
+    categoryFilter,
+    uniqueCategories,
+    people,
+    personFilter,
+    minAmount,
+    maxAmount,
+    startDate,
+    endDate,
+    clearFilters,
+  ]);
 
   return (
     <div className="page-shell">
@@ -394,7 +496,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
             </button>
           )}
           <button
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={toggleFilters}
             className={`p-3 rounded-2xl border-2 transition-all shadow-sm ${showFilters || isFiltered ? 'bg-blue-50 border-blue-300 text-blue-600 shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
             aria-label="Open filters"
             title="Filters"
@@ -442,7 +544,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
           </p>
           {!isFiltered && (
             <button
-              onClick={() => navigate('/add')}
+              onClick={openAddExpense}
               className="mt-5 px-6 py-3 bg-blue-600 text-white text-sm font-bold rounded-2xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
             >
               Add first expense →
@@ -461,60 +563,11 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
             {filteredExpenses.map((expense) => (
-              <motion.div
+              <ExpenseRow
                 key={expense.id}
-                layout
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                className="card-elevated p-5 flex items-center gap-4 cursor-pointer hover:shadow-lg hover:border-blue-200 hover:scale-105 transition-all duration-200"
-                onClick={() => navigate(`/expense/${expense.id}`)}
-              >
-                <div className={`w-12 h-12 ${CATEGORY_BG[expense.category] ?? DEFAULT_BG} rounded-2xl flex items-center justify-center flex-shrink-0 font-bold`}>
-                  {CATEGORY_ICON[expense.category] ?? DEFAULT_ICON}
-                </div>
-                
-                <div className="flex-grow min-w-0">
-                  <div className="flex justify-between items-start gap-2">
-                    <h3 className="font-bold text-slate-900 truncate text-base">
-                      {expense.note || expense.category}
-                    </h3>
-                    <span className="font-black text-slate-900 whitespace-nowrap text-lg">
-                      {formatCurrency(expense.amount)}
-                    </span>
-                  </div>
-                  <div className="flex flex-col items-start gap-1.5 mt-1.5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 min-w-0">
-                      <Calendar className="w-3 h-3 flex-shrink-0" />
-                      <span className="whitespace-nowrap">{format(new Date(expense.date), 'MMM dd, yyyy')}</span>
-                      <span className="text-slate-300 flex-shrink-0">•</span>
-                      <span className="whitespace-nowrap">{formatAddedTime(expense.createdAt)}</span>
-                    </div>
-                    {expense.paidBy && expense.paidBy !== 'Trip Wallet' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px] flex-shrink-0">
-                        <User className="w-2.5 h-2.5" />
-                        {expense.paidBy}
-                      </span>
-                    )}
-                  </div>
-                    {((expense.tags && expense.tags.length > 0) || (expense.receipts && expense.receipts.length > 0) || expense.receiptImage) && (
-                      <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                        {(expense.tags || []).slice(0, 2).map((tag) => (
-                          <span key={`${expense.id}-${tag}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-[10px] font-semibold text-blue-700">
-                            <Tag className="w-2.5 h-2.5" />
-                            {tag}
-                          </span>
-                        ))}
-                        {((expense.receipts && expense.receipts.length > 0) || expense.receiptImage) && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-[10px] font-semibold text-amber-700">
-                            <ImageIcon className="w-2.5 h-2.5" />
-                            {(expense.receipts && expense.receipts.length > 0) ? `${expense.receipts.length} Receipts` : 'Receipt'}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                </div>
-              </motion.div>
+                expense={expense}
+                onOpenExpense={openExpense}
+              />
             ))}
           </AnimatePresence>
         </div>

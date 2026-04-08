@@ -5,7 +5,7 @@ import { formatCurrency } from '../utils/cn';
 import { motion } from 'motion/react';
 import { TrendingUp, PieChart, BarChart3, Users, AlertTriangle, Zap, Crown, Trophy, Receipt } from 'lucide-react';
 import { differenceInDays, parseISO } from 'date-fns';
-import { loadSettledTransfers, isSettled, pruneStale } from '../utils/settlements.ts';
+import { loadSettledTransfers, pruneStale } from '../utils/settlements.ts';
 
 const dateFmt = new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' });
 
@@ -18,6 +18,8 @@ const CAT_GRADIENT: Record<string, string> = {
 const CAT_DOT: Record<string, string> = {
   Food: 'bg-orange-500', Travel: 'bg-blue-500', Stay: 'bg-purple-500', Misc: 'bg-slate-500',
 };
+
+const transferKey = (from: string, to: string, amount: number) => `${from}->${to}:${Math.round(amount * 100)}`;
 
 interface Props { data: TripData; }
 
@@ -32,14 +34,19 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     return pruneStale(loaded, settlement.transfers);
   }, [settlement.transfers]);
 
+  const settledKeySet = useMemo(
+    () => new Set(settledTransfers.map(t => transferKey(t.from, t.to, t.amount))),
+    [settledTransfers]
+  );
+
   const pendingSettlement = useMemo(() => {
-    const pending = settlement.transfers.filter(t => !isSettled(settledTransfers, t.from, t.to, t.amount));
+    const pending = settlement.transfers.filter(t => !settledKeySet.has(transferKey(t.from, t.to, t.amount)));
     return {
       ...settlement,
       transfers: pending,
       totalToSettle: pending.reduce((s, t) => s + t.amount, 0),
     };
-  }, [settlement, settledTransfers]);
+  }, [settlement, settledKeySet]);
 
   const personStats = useMemo(() => {
     if (!people.length) return [];
@@ -73,8 +80,17 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [data.expenses]);
 
-  const maxDaily = useMemo(() => dailyTimeline.length ? Math.max(...dailyTimeline.map(d => d.amount)) : 1, [dailyTimeline]);
-  const minDaily = useMemo(() => dailyTimeline.length ? Math.min(...dailyTimeline.map(d => d.amount)) : 0, [dailyTimeline]);
+  const { maxDaily, minDaily } = useMemo(() => {
+    if (!dailyTimeline.length) return { maxDaily: 1, minDaily: 0 };
+    let max = dailyTimeline[0].amount;
+    let min = dailyTimeline[0].amount;
+    for (let i = 1; i < dailyTimeline.length; i++) {
+      const amount = dailyTimeline[i].amount;
+      if (amount > max) max = amount;
+      if (amount < min) min = amount;
+    }
+    return { maxDaily: max, minDaily: min };
+  }, [dailyTimeline]);
 
   const topExpenses = useMemo(() =>
     [...data.expenses].sort((a, b) => b.amount - a.amount).slice(0, 5),
@@ -103,9 +119,9 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     if (stats.budgetLastsDays !== Infinity && stats.daysRemaining > 0 && stats.budgetLastsDays < stats.daysRemaining) {
       lines.push(`Budget runs out ${Math.floor(stats.budgetLastsDays)} days before trip ends`);
     }
-    if (settlement.totalToSettle > 0) lines.push(`${formatCurrency(pendingSettlement.totalToSettle)} still needs to be settled`);
+    if (pendingSettlement.totalToSettle > 0) lines.push(`${formatCurrency(pendingSettlement.totalToSettle)} still needs to be settled`);
     return lines.slice(0, 4);
-  }, [stats, topSpender, categoryBreakdown, settlement, data.expenses]);
+  }, [stats, topSpender, categoryBreakdown, pendingSettlement.totalToSettle, data.expenses.length]);
 
   const healthScore = useMemo(() => {
     if (!stats) return null;
@@ -123,7 +139,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       if (Math.sqrt(variance) > avg * 1.5) score -= 10;
     }
     return Math.max(0, Math.min(100, Math.round(score)));
-  }, [stats, settlement, dailyTimeline]);
+  }, [stats, pendingSettlement.totalToSettle, dailyTimeline]);
 
   const healthStyle = healthScore === null ? null
     : healthScore >= 75 ? { text: 'text-green-600', bg: 'bg-green-50', bar: 'bg-green-500', label: 'Great' }
@@ -163,7 +179,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
   }
 
   const total = stats.totalSpent;
-  const tripStart = data.setup?.startDate ? parseISO(data.setup.startDate) : null;
+  const tripStart = useMemo(() => (data.setup?.startDate ? parseISO(data.setup.startDate) : null), [data.setup?.startDate]);
 
   return (
     <div className="page-shell space-y-5">

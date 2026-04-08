@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TripData, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
@@ -27,7 +27,7 @@ interface SettlementProps {
 export const Settlement: React.FC<SettlementProps> = ({ data }) => {
   const navigate = useNavigate();
   const proofInputRef = useRef<HTMLInputElement>(null);
-  const people = getTripPeople(data.setup);
+  const people = useMemo(() => getTripPeople(data.setup), [data.setup]);
   const settlement = useMemo(
     () => calculateSettlement(data.setup, data.expenses),
     [data.setup, data.expenses]
@@ -44,6 +44,30 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
   const [proofImage, setProofImage] = useState<string | null>(null);
   const [proofName, setProofName] = useState<string | null>(null);
   const [previewProof, setPreviewProof] = useState<string | null>(null);
+
+  const transferKey = useCallback((from: string, to: string, amount: number) => {
+    return `${from}|${to}|${Math.round(amount * 100)}`;
+  }, []);
+
+  const settledMap = useMemo(() => {
+    const map = new Map<string, SettledTransfer>();
+    settled.forEach((entry) => {
+      map.set(transferKey(entry.from, entry.to, entry.amount), entry);
+    });
+    return map;
+  }, [settled, transferKey]);
+
+  const settledKeySet = useMemo(() => {
+    const keys = new Set<string>();
+    settled.forEach((entry) => {
+      keys.add(transferKey(entry.from, entry.to, entry.amount));
+    });
+    return keys;
+  }, [settled, transferKey]);
+
+  useEffect(() => {
+    setSettled((prev) => pruneStale(prev, settlement.transfers));
+  }, [settlement.transfers]);
 
   const handleMarkSettled = useCallback((payload: ConfirmPayload) => {
     setConfirmPayload(payload);
@@ -110,20 +134,18 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
     appendSettlementHistory({ action: 'undo', from, to, amount });
   }, []);
 
-  const getSettledEntry = useCallback((from: string, to: string, amount: number) => {
-    const rounded = Math.round(amount * 100);
-    return settled.find(s => s.from === from && s.to === to && Math.round(s.amount * 100) === rounded);
-  }, [settled]);
-
   const { pendingTransfers, settledTransfers } = useMemo(() => ({
-    pendingTransfers: settlement.transfers.filter(t => !isSettled(settled, t.from, t.to, t.amount)),
-    settledTransfers: settlement.transfers.filter(t => isSettled(settled, t.from, t.to, t.amount)),
-  }), [settlement.transfers, settled]);
+    pendingTransfers: settlement.transfers.filter(t => !settledKeySet.has(transferKey(t.from, t.to, t.amount))),
+    settledTransfers: settlement.transfers.filter(t => settledKeySet.has(transferKey(t.from, t.to, t.amount))),
+  }), [settlement.transfers, settledKeySet, transferKey]);
 
   const pendingTotal = useMemo(
     () => pendingTransfers.reduce((s, t) => s + t.amount, 0),
     [pendingTransfers]
   );
+
+  const goMembers = useCallback(() => navigate('/members'), [navigate]);
+  const goAddExpense = useCallback(() => navigate('/add'), [navigate]);
 
   const allSettled = settlement.transfers.length > 0 && pendingTransfers.length === 0;
 
@@ -136,7 +158,7 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
         <p className="font-bold text-lg text-slate-700">No participants yet</p>
         <p className="text-sm text-slate-400 mt-1">Add members to calculate settlements</p>
         <button
-          onClick={() => navigate('/members')}
+          onClick={goMembers}
           className="mt-5 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold shadow-lg shadow-blue-100"
         >
           Add Members →
@@ -159,7 +181,7 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
           <p className="font-black text-slate-900 text-lg">No expenses yet</p>
           <p className="text-sm text-slate-500 mt-2">Add the first expense to automatically generate settlement transfers.</p>
           <button
-            onClick={() => navigate('/add')}
+            onClick={goAddExpense}
             className="mt-5 px-6 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold shadow-lg shadow-blue-100"
           >
             Add first expense {'->'}
@@ -300,7 +322,7 @@ export const Settlement: React.FC<SettlementProps> = ({ data }) => {
           </p>
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             {settledTransfers.map((transfer, idx) => {
-              const entry = getSettledEntry(transfer.from, transfer.to, transfer.amount);
+              const entry = settledMap.get(transferKey(transfer.from, transfer.to, transfer.amount));
               return (
                 <React.Fragment key={`${transfer.from}-${transfer.to}-${transfer.amount}`}>
                   {idx > 0 && <div className="h-px bg-slate-50 mx-4" />}
