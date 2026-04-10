@@ -5,6 +5,9 @@ export interface SettledTransfer {
   to: string;
   amount: number;
   settledAt: string; // ISO timestamp
+  fromUserId?: string;
+  toUserId?: string;
+  status?: 'pending' | 'completed';
   note?: string;
   proofImage?: string;
   proofName?: string;

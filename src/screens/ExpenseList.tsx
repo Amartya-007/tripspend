@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Expense, TripSetup, getTripPeople } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
-import { Utensils, Plane, Home, Package, Calendar, Filter, X, Search, Tag, Image as ImageIcon, User, ChevronDown, Check } from 'lucide-react';
+import { Utensils, Plane, Home, Package, Filter, X, Search, Tag, Image as ImageIcon, User, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isWithinInterval, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { createPortal } from 'react-dom';
@@ -196,9 +196,8 @@ const ExpenseRow = React.memo(({ expense, onOpenExpense }: ExpenseRowProps) => {
         </div>
         <div className="flex flex-col items-start gap-1.5 mt-1.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 min-w-0">
-            <Calendar className="w-3 h-3 flex-shrink-0" />
             <span className="whitespace-nowrap">{dateLabel}</span>
-            <span className="text-slate-300 flex-shrink-0">•</span>
+            <span className="text-slate-300 flex-shrink-0">·</span>
             <span className="whitespace-nowrap">{addedTimeLabel}</span>
           </div>
           {expense.paidBy && expense.paidBy !== 'Trip Wallet' && (
@@ -243,19 +242,22 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'highest'>('newest');
 
-  const openFilters = useCallback(() => setShowFilters(true), []);
   const closeFilters = useCallback(() => setShowFilters(false), []);
   const toggleFilters = useCallback(() => setShowFilters((prev) => !prev), []);
   const openAddExpense = useCallback(() => navigate('/add'), [navigate]);
   const openExpense = useCallback((id: string) => navigate(`/expense/${id}`), [navigate]);
 
+  const filterDateRange = useMemo(() => ({
+    start: startDate ? startOfDay(parseISO(startDate)) : new Date(0),
+    end: endDate ? endOfDay(parseISO(endDate)) : new Date(8640000000000000),
+    hasFilter: Boolean(startDate || endDate),
+  }), [startDate, endDate]);
+
   const filteredExpenses = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
     const min = minAmount ? parseFloat(minAmount) : null;
     const max = maxAmount ? parseFloat(maxAmount) : null;
-    const hasDateFilter = Boolean(startDate || endDate);
-    const start = startDate ? startOfDay(parseISO(startDate)) : new Date(0);
-    const end = endDate ? endOfDay(parseISO(endDate)) : new Date(8640000000000000);
+    const { start, end, hasFilter: hasDateFilter } = filterDateRange;
 
     const base = expenses.filter(expense => {
       const matchesCategory = categoryFilter === 'All' || expense.category === categoryFilter;
@@ -292,7 +294,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
       }
       return sortDateMs(b.date) - sortDateMs(a.date);
     });
-  }, [expenses, categoryFilter, startDate, endDate, deferredSearchQuery, sortBy, personFilter, minAmount, maxAmount]);
+  }, [expenses, categoryFilter, filterDateRange, deferredSearchQuery, sortBy, personFilter, minAmount, maxAmount]);
 
   const uniqueCategories = useMemo(
     () => ['All', ...Array.from(new Set(expenses.map(e => e.category)))],
@@ -367,8 +369,8 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
                   <>
                     <div className="h-px bg-slate-200" />
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block flex items-center gap-1">
-                        <User className="w-3 h-3" /> Person
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+                        Person
                       </label>
                       <div className="flex flex-wrap gap-2">
                         {['All', ...people].map(person => (

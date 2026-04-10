@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo } from 'react';
 import { TripData, calculateStats } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
-import { Settings, Zap, Calendar, Clock, AlertTriangle, BarChart3, ChevronRight } from 'lucide-react';
+import { Settings, AlertTriangle, BarChart3, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { differenceInDays, parseISO, startOfDay } from 'date-fns';
 
-// Motion animation configurations
 const MOTION_VARIANTS = {
   fadeSlideDown: { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 } },
   fadeSlideUp: { initial: { opacity: 0, y: 15 }, animate: { opacity: 1, y: 0 } },
@@ -16,9 +15,8 @@ const MOTION_VARIANTS = {
 const ANIMATION_DELAYS = {
   balance: 0.05,
   today: 0.1,
-  yesterday: 0.15,
-  dailyLimit: 0.2,
-  analyticsCta: 0.25,
+  dailyLimit: 0.15,
+  analyticsCta: 0.2,
 };
 
 interface DashboardProps {
@@ -45,15 +43,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
             <h1 className="page-title">TripSpend</h1>
             <p className="page-subtitle">Budget Dashboard</p>
           </div>
-          <Link to="/settings" className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 text-slate-600 hover:shadow-lg hover:text-blue-600 transition-all duration-200">
+          <Link to="/settings" className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 text-slate-500 hover:shadow-lg hover:text-blue-600 transition-all duration-200">
             <Settings className="w-5 h-5" />
           </Link>
         </div>
 
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 text-center">
-          <div className="w-16 h-16 bg-blue-50 rounded-2xl mx-auto flex items-center justify-center mb-4">
-            <BarChart3 className="w-8 h-8 text-blue-500" />
-          </div>
           <p className="font-black text-slate-900 text-lg">No expenses yet</p>
           <p className="text-sm text-slate-500 mt-2">Start with your first expense to unlock burn rate, alerts, and analytics.</p>
           <div className="mt-5 grid grid-cols-2 gap-3">
@@ -84,48 +79,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
   }, [stats.isOverspending, stats.projectedDeficit, todayDate]);
 
   return (
-    <div className="page-shell space-y-5">
+    <div className="page-shell space-y-3">
       {/* Header */}
       <div className="flex justify-between items-center page-header">
         <div>
           <h1 className="page-title">TripSpend</h1>
           <p className="page-subtitle">Budget Dashboard</p>
         </div>
-        <Link to="/settings" className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 text-slate-600 hover:shadow-lg hover:text-blue-600 transition-all duration-200">
-          <Settings className="w-5 h-5" />
+        <Link to="/settings" className="p-2.5 bg-white rounded-2xl shadow-md border border-slate-200 text-slate-500 hover:shadow-lg hover:text-blue-600 transition-all duration-200">
+          <Settings className="w-4.5 h-4.5" />
         </Link>
       </div>
 
       {/* Trip snapshot */}
       <motion.div {...MOTION_VARIANTS.fadeSlideDown}
-        className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-3xl p-5 text-white shadow-xl shadow-blue-200">
-        <p className="text-blue-200 text-xs font-bold uppercase tracking-widest mb-3">Current Trip</p>
+        className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-4 text-white shadow-lg shadow-blue-200">
+        <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest mb-2">Current Trip</p>
         {isPreTrip && (
-          <div className="mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/15 border border-white/20">
-            <Calendar className="w-3.5 h-3.5 text-blue-100" />
-            <span className="text-[11px] font-bold text-blue-50">
-              Trip starts in {daysUntilStart} day{daysUntilStart > 1 ? 's' : ''}
+          <div className="mb-2 inline-flex items-center px-2.5 py-1 rounded-full bg-white/15 border border-white/20">
+            <span className="text-[10px] font-bold text-blue-50">
+              Starts in {daysUntilStart} day{daysUntilStart > 1 ? 's' : ''}
             </span>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div><p className="text-blue-200 text-xs">Budget</p><p className="font-black text-xl">{formatCurrency(data.setup.totalBudget)}</p></div>
-          <div><p className="text-blue-200 text-xs">Spent</p><p className="font-black text-xl">{formatCurrency(stats.totalSpent)}</p></div>
-          <div><p className="text-blue-200 text-xs">People</p><p className="font-black text-xl">{data.setup.peopleCount}</p></div>
-          <div><p className="text-blue-200 text-xs">Expenses</p><p className="font-black text-xl">{data.expenses.length}</p></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><p className="text-blue-200 text-[10px]">Budget</p><p className="font-black text-base">{formatCurrency(data.setup.totalBudget)}</p></div>
+          <div><p className="text-blue-200 text-[10px]">Spent</p><p className="font-black text-base">{formatCurrency(stats.totalSpent)}</p></div>
+          <div><p className="text-blue-200 text-[10px]">People</p><p className="font-black text-base">{data.setup.peopleCount}</p></div>
+          <div><p className="text-blue-200 text-[10px]">Expenses</p><p className="font-black text-base">{data.expenses.length}</p></div>
         </div>
       </motion.div>
 
       {/* Overspend alert */}
       {stats.isOverspending && (
         <motion.div {...MOTION_VARIANTS.fadeSlideDown}
-          className="bg-gradient-to-r from-red-50 to-rose-50 border border-red-200 p-4 rounded-3xl">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+          className="bg-red-50 border border-red-200 px-3.5 py-2.5 rounded-2xl">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
             <div>
-              <p className="font-bold text-red-800">Budget Alert</p>
-              <p className="text-sm text-red-700 leading-relaxed">
-                Projected to overshoot by {formatCurrency(stats.projectedDeficit)} by trip end.
+              <p className="font-bold text-red-800 text-sm">Budget Alert</p>
+              <p className="text-xs text-red-700">
+                Projected to overshoot by {formatCurrency(stats.projectedDeficit)}.
               </p>
             </div>
           </div>
@@ -134,60 +128,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
 
       {/* Remaining balance */}
       <motion.div {...MOTION_VARIANTS.fadeScale} transition={{ delay: ANIMATION_DELAYS.balance }}
-        className={`p-6 rounded-3xl border-2 ${stats.borderColor} ${stats.bgColor} shadow-sm`}>
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Remaining Balance</p>
-        <h2 className={`text-5xl font-black ${stats.statusColor} mb-4`}>{formatCurrency(stats.remainingBalance)}</h2>
-        <div className="w-full bg-slate-200 rounded-full h-2.5 mb-3">
+        className={`p-4 rounded-2xl border-2 ${stats.borderColor} ${stats.bgColor} shadow-sm`}>
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Remaining Balance</p>
+        <h2 className={`text-4xl font-black ${stats.statusColor} mb-3`}>{formatCurrency(stats.remainingBalance)}</h2>
+        <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
           <div
             className={`h-full rounded-full transition-all duration-1000 ${stats.statusColor.replace('text', 'bg')}`}
             style={{ width: `${Math.max(0, Math.min(100, stats.remainingPercentage))}%` }}
           />
         </div>
-        <div className="flex justify-between items-center text-xs font-semibold text-slate-600">
+        <div className="flex justify-between items-center text-xs font-semibold text-slate-500">
           <span>{stats.remainingPercentage.toFixed(1)}% of budget left</span>
-          <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{stats.daysRemaining} days left</span>
+          <span>{stats.daysRemaining} days left</span>
         </div>
       </motion.div>
 
       {/* Today / Yesterday */}
-      <div className="grid grid-cols-2 gap-4">
-        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.today }} className="card-elevated p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Clock className="w-4 h-4 text-blue-600" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Today</span>
-          </div>
-          <p className="text-2xl font-black text-slate-900">{formatCurrency(stats.todaySpent)}</p>
+      <div className="grid grid-cols-2 gap-3">
+        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.today }} className="card-elevated p-3.5">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Today</p>
+          <p className="text-xl font-black text-slate-900">{formatCurrency(stats.todaySpent)}</p>
         </motion.div>
-        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.yesterday }} className="card-elevated p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center">
-              <Clock className="w-4 h-4 text-slate-400" />
-            </div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Yesterday</span>
-          </div>
-          <p className="text-2xl font-black text-slate-600">{formatCurrency(stats.yesterdaySpent)}</p>
+        <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.today }} className="card-elevated p-3.5">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Yesterday</p>
+          <p className="text-xl font-black text-slate-500">{formatCurrency(stats.yesterdaySpent)}</p>
         </motion.div>
       </div>
 
-      {/* Safe daily limit — single most useful number */}
+      {/* Safe daily limit */}
       <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.dailyLimit }}
-        className="bg-gradient-to-br from-blue-600 to-blue-700 p-5 rounded-3xl text-white shadow-xl shadow-blue-200">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="p-1.5 bg-blue-500/30 rounded-lg">
-            <Zap className="w-4 h-4 text-yellow-300 fill-yellow-300" />
-          </div>
-          <p className="font-bold">Today's Limit</p>
-        </div>
+        className="bg-gradient-to-br from-blue-600 to-blue-700 p-4 rounded-2xl text-white shadow-lg shadow-blue-200">
+        <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest mb-2">Today's Limit</p>
         <div className="flex items-end justify-between">
           <div>
-            <p className="text-blue-200 text-xs mb-1">Safe to spend today</p>
-            <p className="text-4xl font-black">{formatCurrency(stats.remainingPerDay)}</p>
+            <p className="text-blue-200 text-[10px] mb-0.5">Safe to spend today</p>
+            <p className="text-3xl font-black">{formatCurrency(stats.remainingPerDay)}</p>
           </div>
           <div className="text-right">
-            <p className="text-blue-200 text-xs mb-1">Burn rate</p>
-            <p className="text-xl font-bold">{formatCurrency(stats.dailyBurnRate)}</p>
+            <p className="text-blue-200 text-[10px] mb-0.5">Burn rate</p>
+            <p className="text-lg font-bold">{formatCurrency(stats.dailyBurnRate)}</p>
           </div>
         </div>
       </motion.div>
@@ -196,18 +175,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ data }) => {
       <motion.div {...MOTION_VARIANTS.fadeSlideUp} transition={{ delay: ANIMATION_DELAYS.analyticsCta }}>
         <Link
           to="/analytics"
-          className="flex items-center justify-between p-5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-3xl group hover:shadow-md transition-all"
+          className="flex items-center justify-between p-3.5 bg-blue-50 border border-blue-100 rounded-2xl group hover:shadow-md transition-all"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+              <BarChart3 className="w-4 h-4 text-white" />
             </div>
             <div>
               <p className="font-bold text-slate-900 text-sm">Full Analytics</p>
-              <p className="text-xs text-slate-500 mt-0.5">Per person, burn rate, health score</p>
+              <p className="text-xs text-slate-500">Per person · burn rate · health score</p>
             </div>
           </div>
-          <ChevronRight className="w-5 h-5 text-blue-400 group-hover:translate-x-1 transition-transform" />
+          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
         </Link>
       </motion.div>
     </div>

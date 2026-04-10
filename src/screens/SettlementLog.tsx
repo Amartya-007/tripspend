@@ -1,12 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, RotateCcw, FileImage, History, MessageSquare, Trash2 } from 'lucide-react';
 import { formatCurrency } from '../utils/cn';
-import {
-  SettlementHistoryEntry,
-  loadSettlementHistory,
-  clearSettlementHistory,
-} from '../utils/settlementHistory.ts';
+import { SettlementHistoryEntry } from '../utils/settlementHistory.ts';
+import { useSettlementHistory } from '../hooks/useSettlementHistory.ts';
 import { motion, AnimatePresence } from 'motion/react';
 
 const historyDateFmt = new Intl.DateTimeFormat('en-IN', {
@@ -16,10 +13,21 @@ const historyDateFmt = new Intl.DateTimeFormat('en-IN', {
   minute: '2-digit',
 });
 
-export const SettlementLog: React.FC = () => {
+interface SettlementLogProps {
+  tripId?: string | null;
+  isCollaborative?: boolean;
+}
+
+export const SettlementLog: React.FC<SettlementLogProps> = ({
+  tripId = null,
+  isCollaborative = false,
+}) => {
   const navigate = useNavigate();
-  const [entries, setEntries] = useState<SettlementHistoryEntry[]>(() => loadSettlementHistory());
-  const [previewProof, setPreviewProof] = useState<string | null>(null);
+  const { entries, clear } = useSettlementHistory({
+    tripId,
+    isCollaborative,
+  });
+  const [previewProof, setPreviewProof] = React.useState<string | null>(null);
   const hasEntries = entries.length > 0;
 
   const stats = useMemo(() => {
@@ -51,9 +59,8 @@ export const SettlementLog: React.FC = () => {
 
   const handleClear = useCallback(() => {
     if (!window.confirm('Clear full settlement log? This does not change current settled state.')) return;
-    clearSettlementHistory();
-    setEntries([]);
-  }, []);
+    clear();
+  }, [clear]);
 
   return (
     <div className="page-shell space-y-5">

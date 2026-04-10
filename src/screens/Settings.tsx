@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RotateCcw, Edit3, ChevronRight, Download, Upload, Share2, Users, Tag, FileText, History, CloudUpload, CloudDownload, LogIn, LogOut } from 'lucide-react';
+import { RotateCcw, Edit3, ChevronRight, Download, Upload, Share2, FileText, History, CloudUpload, CloudDownload, LogIn, LogOut, Bell, HandCoins } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
@@ -27,10 +27,20 @@ interface SettingsProps {
   onSignOutGoogle: () => void;
   onCloudBackup: () => void;
   onCloudRestore: () => void;
+  notificationsEnabled: boolean;
+  notificationPermission: 'prompt' | 'granted' | 'denied';
+  onEnableNotifications: () => void;
+  onDisableNotifications: () => void;
+  onOpenNotificationSettings: () => void;
+  dailyExpenseRemindersEnabled: boolean;
+  pendingSettlementRemindersEnabled: boolean;
+  onDailyExpenseRemindersChange: (enabled: boolean) => void;
+  onPendingSettlementRemindersChange: (enabled: boolean) => void;
   // Multi-trip props
   trips?: Trip[];
   activeTrip?: string | null;
   onCreateTrip?: (name: string) => void;
+  onJoinTrip?: (tripId: string) => Promise<boolean>;
   onSelectTrip?: (tripId: string) => void;
   onDeleteTrip?: (tripId: string) => void;
   onRenameTrip?: (tripId: string, newName: string) => void;
@@ -65,9 +75,19 @@ export const Settings: React.FC<SettingsProps> = ({
   onSignOutGoogle,
   onCloudBackup,
   onCloudRestore,
+  notificationsEnabled,
+  notificationPermission,
+  onEnableNotifications,
+  onDisableNotifications,
+  onOpenNotificationSettings,
+  dailyExpenseRemindersEnabled,
+  pendingSettlementRemindersEnabled,
+  onDailyExpenseRemindersChange,
+  onPendingSettlementRemindersChange,
   trips = [],
   activeTrip = null,
   onCreateTrip,
+  onJoinTrip,
   onSelectTrip,
   onDeleteTrip,
   onRenameTrip,
@@ -390,7 +410,7 @@ export const Settings: React.FC<SettingsProps> = ({
   }, [navigate, onImport, pushNotice]);
 
   return (
-    <div className="page-shell space-y-6">
+    <div className="page-shell space-y-4">
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
         <p className="page-subtitle">Manage your trip</p>
@@ -408,37 +428,98 @@ export const Settings: React.FC<SettingsProps> = ({
                 navigate('/');
               }}
               onCreateTrip={(name) => onCreateTrip?.(name)}
+              onJoinTrip={(tripId) => onJoinTrip?.(tripId) ?? Promise.resolve(false)}
               onDeleteTrip={(tripId) => onDeleteTrip?.(tripId)}
               onRenameTrip={(tripId, name) => onRenameTrip?.(tripId, name)}
+              notify={pushNotice}
             />
           </div>
         </Section>
       )}
 
       {/* Trip */}
-      <Section label="Trip">
+      <Section label="Trip & Organization">
         <SettingItem icon={<Edit3 className="w-4.5 h-4.5 text-blue-600" />} iconBg="bg-blue-50"
-          label="Edit Trip Setup" description="Budget, dates, people"
-          onClick={() => navigate('/setup')} />
+          label="Edit Trip" description="Budget, dates, members, categories"
+          onClick={() => navigate('/trip-details')} />
         <Divider />
-        <SettingItem icon={<Users className="w-4.5 h-4.5 text-teal-600" />} iconBg="bg-teal-50"
-          label="Manage Members" description="Add or rename participants"
-          onClick={() => navigate('/members')} />
-        <Divider />
-        <SettingItem icon={<Tag className="w-4.5 h-4.5 text-rose-600" />} iconBg="bg-rose-50"
-          label="Manage Categories" description="Customise expense categories"
-          onClick={() => navigate('/categories')} />
-      </Section>
-
-      {/* Logs */}
-      <Section label="Logs">
         <SettingItem icon={<History className="w-4.5 h-4.5 text-violet-600" />} iconBg="bg-violet-50"
-          label="Full Settlement Log" description="View complete settle/reopen audit trail"
+          label="Settlement Log" description="Complete settle/reopen audit trail"
           onClick={() => navigate('/settlement-log')} />
       </Section>
 
-      {/* Share */}
-      <Section label="Share">
+      {/* Notifications */}
+      <Section label="Notifications">
+        <ToggleItem
+          icon={<Bell className="w-4.5 h-4.5 text-blue-600" />}
+          iconBg="bg-blue-50"
+          label="System notifications"
+          description={notificationsEnabled
+            ? 'Enabled for reminders and notifications'
+            : notificationPermission === 'granted'
+              ? 'Permission granted. Turn on to receive reminders.'
+            : notificationPermission === 'denied'
+              ? 'Open system settings to allow reminders'
+              : 'Permission not yet granted'}
+          enabled={notificationsEnabled}
+          onToggle={() => {
+            if (notificationsEnabled) {
+              onDisableNotifications();
+              return;
+            }
+            onEnableNotifications();
+          }}
+        />
+        <div className="px-4 pb-3 pt-1 flex items-center justify-between gap-3">
+          <p className="text-[11px] text-slate-400 leading-5">
+            Uses native notifications for reminders.
+          </p>
+          {!notificationsEnabled && (
+            <button
+              type="button"
+              onClick={onOpenNotificationSettings}
+              className="shrink-0 px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-[11px] font-bold"
+            >
+              Open settings
+            </button>
+          )}
+        </div>
+      </Section>
+
+      {/* Smart Reminders */}
+      <Section label="Smart Reminders">
+        <ToggleItem
+          icon={<Bell className="w-4.5 h-4.5 text-blue-600" />}
+          iconBg="bg-blue-50"
+          label="Daily expense reminder"
+          description={notificationsEnabled
+            ? 'Nudge me when no expense has been added today'
+            : 'Enable system notifications first'}
+          enabled={notificationsEnabled && dailyExpenseRemindersEnabled}
+          disabled={!notificationsEnabled}
+          onToggle={() => notificationsEnabled && onDailyExpenseRemindersChange(!dailyExpenseRemindersEnabled)}
+        />
+        <Divider />
+        <ToggleItem
+          icon={<HandCoins className="w-4.5 h-4.5 text-amber-600" />}
+          iconBg="bg-amber-50"
+          label="Pending settlement reminder"
+          description={notificationsEnabled
+            ? 'Remind me after the trip ends until settlements are cleared'
+            : 'Enable system notifications first'}
+          enabled={notificationsEnabled && pendingSettlementRemindersEnabled}
+          disabled={!notificationsEnabled}
+          onToggle={() => notificationsEnabled && onPendingSettlementRemindersChange(!pendingSettlementRemindersEnabled)}
+        />
+        <div className="px-4 pb-3 pt-1">
+          <p className="text-[11px] text-slate-400 leading-5">
+            Available only when system notifications are enabled.
+          </p>
+        </div>
+      </Section>
+
+      {/* Share + Data */}
+      <Section label="Share & Data">
         <SettingItem icon={<Share2 className="w-4.5 h-4.5 text-emerald-600" />} iconBg="bg-emerald-50"
           label="Share Summary" description="Send trip summary via WhatsApp"
           onClick={handleShare} />
@@ -450,27 +531,35 @@ export const Settings: React.FC<SettingsProps> = ({
         <SettingItem icon={<FileText className="w-4.5 h-4.5 text-cyan-700" />} iconBg="bg-cyan-50"
           label="Trip Closing Report (PDF)" description="Totals, categories, payers, and settlements"
           onClick={() => { void handleExportClosingReport(); }} />
+        <SettingItem icon={<Download className="w-4.5 h-4.5 text-purple-600" />} iconBg="bg-purple-50"
+          label="Export Backup" description="Save all data as JSON"
+          onClick={() => { void handleExport(); }} />
+        <Divider />
+        <SettingItem icon={<Upload className="w-4.5 h-4.5 text-amber-600" />} iconBg="bg-amber-50"
+          label="Import Backup" description="Restore from a JSON backup"
+          onClick={() => fileInputRef.current?.click()} />
+        <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
       </Section>
 
       {/* Cloud */}
-      <Section label="Cloud Sync">
+      <Section label="Cloud & Account">
         {!firebaseConfigured && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-            Firebase is not configured yet. Add VITE_FIREBASE_* values to your env file.
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[11px] text-amber-800 mx-4 mt-3 mb-2">
+            Firebase is not configured yet. Add VITE_FIREBASE_* env values.
           </div>
         )}
 
         {firebaseConfigured && (
           <>
-            <div className={`mx-4 mt-4 mb-2 rounded-2xl border px-3.5 py-3 ${autoSyncError ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
-              <p className={`text-xs font-semibold ${autoSyncError ? 'text-rose-700' : 'text-emerald-700'}`}>
+            <div className={`mx-4 mt-3 mb-2 rounded-2xl border px-3 py-2.5 ${autoSyncError ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
+              <p className={`text-[11px] font-semibold ${autoSyncError ? 'text-rose-700' : 'text-emerald-700'}`}>
                 {autoSyncError ? autoSyncError : `Last auto-sync: ${formatTimeAgo(lastAutoSyncAt)}`}
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-600">
-                <p>Last success: <span className="font-semibold text-slate-700">{formatTimeAgo(lastAutoSyncAt)}</span></p>
-                <p>Last attempt: <span className="font-semibold text-slate-700">{formatTimeAgo(lastSyncAttemptAt)}</span></p>
-                <p>Pending changes: <span className="font-semibold text-slate-700">{pendingSyncCount}</span></p>
-                <p>Next retry: <span className="font-semibold text-slate-700">{pendingSyncCount > 0 ? formatRetry(nextRetryAt) : '-'}</span></p>
+              <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-slate-600">
+                <p>Success: <span className="font-semibold text-slate-700">{formatTimeAgo(lastAutoSyncAt)}</span></p>
+                <p>Attempt: <span className="font-semibold text-slate-700">{formatTimeAgo(lastSyncAttemptAt)}</span></p>
+                <p>Pending: <span className="font-semibold text-slate-700">{pendingSyncCount}</span></p>
+                <p>Retry: <span className="font-semibold text-slate-700">{pendingSyncCount > 0 ? formatRetry(nextRetryAt) : '-'}</span></p>
               </div>
             </div>
             <SettingItem
@@ -500,18 +589,6 @@ export const Settings: React.FC<SettingsProps> = ({
         )}
       </Section>
 
-      {/* Data */}
-      <Section label="Data">
-        <SettingItem icon={<Download className="w-4.5 h-4.5 text-purple-600" />} iconBg="bg-purple-50"
-          label="Export Backup" description="Save all data as JSON"
-          onClick={() => { void handleExport(); }} />
-        <Divider />
-        <SettingItem icon={<Upload className="w-4.5 h-4.5 text-amber-600" />} iconBg="bg-amber-50"
-          label="Import Backup" description="Restore from a JSON backup"
-          onClick={() => fileInputRef.current?.click()} />
-        <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
-      </Section>
-
       {/* Danger */}
       <Section label="Danger Zone">
         <SettingItem icon={<RotateCcw className="w-4.5 h-4.5 text-red-600" />} iconBg="bg-red-50"
@@ -531,16 +608,46 @@ export const Settings: React.FC<SettingsProps> = ({
 
 const Section: React.FC<{ label: string; children: React.ReactNode; allowOverflow?: boolean }> = ({ label, children, allowOverflow = false }) => (
   <div>
-    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">{label}</p>
-    <div className={`bg-white rounded-3xl border border-slate-100 shadow-sm ${allowOverflow ? 'overflow-visible relative z-20' : 'overflow-hidden'}`}>
+    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 px-1">{label}</p>
+    <div className={`bg-white rounded-2xl border border-slate-100 shadow-sm ${allowOverflow ? 'overflow-visible relative z-20' : 'overflow-hidden'}`}>
       {children}
     </div>
   </div>
 );
 
-const Divider = () => <div className="h-px bg-slate-50 mx-5" />;
+const Divider = () => <div className="h-px bg-slate-50 mx-4" />;
 
-const SettingItem = ({ icon, iconBg, label, description, onClick, danger }: {
+const ToggleItem = ({ label, description, enabled, onToggle, disabled = false }: {
+  icon: React.ReactNode;
+  iconBg: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}) => (
+  <div className="w-full px-4 py-3 flex items-center gap-3">
+    <div className="flex-1 min-w-0">
+      <p className="font-semibold text-sm leading-tight text-slate-900">{label}</p>
+      <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+    </div>
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      className={`relative w-14 h-8 rounded-full transition-colors flex-shrink-0 ${enabled ? 'bg-blue-600' : 'bg-slate-300'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+      aria-pressed={enabled}
+      aria-label={label}
+      aria-disabled={disabled}
+    >
+      <span
+        className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow-sm transition-transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-0'}`}
+      />
+    </button>
+  </div>
+);
+
+const SettingItem = ({ label, description, onClick, danger }: {
   icon: React.ReactNode;
   iconBg: string;
   label: string;
@@ -551,11 +658,8 @@ const SettingItem = ({ icon, iconBg, label, description, onClick, danger }: {
   <motion.button
     whileTap={{ scale: 0.98 }}
     onClick={onClick}
-    className="w-full px-5 py-4 flex items-center gap-4 hover:bg-slate-50 transition-colors text-left group"
+    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors text-left group"
   >
-    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${iconBg}`}>
-      {icon}
-    </div>
     <div className="flex-1 min-w-0">
       <p className={`font-semibold text-sm leading-tight ${danger ? 'text-red-600' : 'text-slate-900'}`}>{label}</p>
       <p className="text-xs text-slate-400 mt-0.5">{description}</p>

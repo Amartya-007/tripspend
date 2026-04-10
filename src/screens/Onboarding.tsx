@@ -1,135 +1,150 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Wallet, Users, BarChart3, ShieldCheck } from 'lucide-react';
+import { IndianRupee, Users, TrendingUp, ArrowRight, Check } from 'lucide-react';
 
 interface OnboardingScreenProps {
   onComplete: () => void;
 }
 
-interface OnboardingSlide {
-  title: string;
-  subtitle: string;
-  bullets: string[];
-  icon: React.ReactNode;
-  color: string;
-}
-
-const SLIDES: OnboardingSlide[] = [
+const SLIDES = [
   {
-    title: 'Welcome to TripSpend',
-    subtitle: 'Set up your trip in under 60 seconds',
-    bullets: [
-      'Add your members and budget once',
-      'Customize categories for this trip',
-      'Track spending without any account'
+    icon: <IndianRupee className="w-8 h-8 text-white" />,
+    gradient: 'from-blue-600 to-blue-700',
+    glow: 'shadow-blue-300',
+    bg: 'bg-blue-50',
+    accent: 'text-blue-600',
+    title: 'Track Every Rupee',
+    subtitle: 'Set up your trip budget in under 60 seconds',
+    features: [
+      { emoji: '💰', text: 'Set per-person budget once' },
+      { emoji: '🏷️', text: 'Custom categories for your trip' },
+      { emoji: '📵', text: 'Works fully offline, no account needed' },
     ],
-    icon: <Wallet className="w-6 h-6" />,
-    color: 'from-blue-600 to-indigo-600',
   },
   {
-    title: 'Split Clearly',
+    icon: <Users className="w-8 h-8 text-white" />,
+    gradient: 'from-emerald-500 to-emerald-600',
+    glow: 'shadow-emerald-300',
+    bg: 'bg-emerald-50',
+    accent: 'text-emerald-600',
+    title: 'Split Without Drama',
     subtitle: 'Know exactly who paid and who owes',
-    bullets: [
-      'Capture payer and participants per expense',
-      'See auto-calculated net balances',
-      'Mark settlements with notes and proof'
+    features: [
+      { emoji: '🧾', text: 'Capture payer and split per expense' },
+      { emoji: '⚖️', text: 'Auto-calculated net balances' },
+      { emoji: '✅', text: 'Mark settlements with proof' },
     ],
-    icon: <Users className="w-6 h-6" />,
-    color: 'from-emerald-600 to-teal-600',
   },
   {
+    icon: <TrendingUp className="w-8 h-8 text-white" />,
+    gradient: 'from-violet-600 to-purple-700',
+    glow: 'shadow-violet-300',
+    bg: 'bg-violet-50',
+    accent: 'text-violet-600',
     title: 'Stay in Control',
-    subtitle: 'Keep budget and trends visible every day',
-    bullets: [
-      'Track burn rate and daily safe spend',
-      'Review category and member analytics',
-      'Export summaries and closing reports'
+    subtitle: 'Smart insights that keep you on budget',
+    features: [
+      { emoji: '🔥', text: 'Daily burn rate and safe spend limit' },
+      { emoji: '📊', text: 'Category and member analytics' },
+      { emoji: '📄', text: 'PDF closing report to share' },
     ],
-    icon: <BarChart3 className="w-6 h-6" />,
-    color: 'from-amber-500 to-orange-600',
   },
 ];
 
-const TOTAL_SLIDES = SLIDES.length;
-const PROGRESS_SPRING = { type: 'spring', stiffness: 200, damping: 26 } as const;
-
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete }) => {
   const [index, setIndex] = useState(0);
-  const current = useMemo(() => SLIDES[index], [index]);
-  const isLast = useMemo(() => index === TOTAL_SLIDES - 1, [index]);
-  const stepLabel = useMemo(() => `Step ${index + 1} of ${TOTAL_SLIDES}`, [index]);
+  const [direction, setDirection] = useState(1);
+  const slide = SLIDES[index];
+  const isLast = index === SLIDES.length - 1;
 
-  const handleComplete = useCallback(() => {
-    onComplete();
-  }, [onComplete]);
-
-  const handleNext = useCallback(() => {
-    setIndex((v) => Math.min(TOTAL_SLIDES - 1, v + 1));
+  const next = useCallback(() => {
+    setDirection(1);
+    setIndex(i => Math.min(SLIDES.length - 1, i + 1));
   }, []);
 
-  const progressWidth = useMemo(() => `${((index + 1) / TOTAL_SLIDES) * 100}%`, [index]);
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 px-4 py-7 flex flex-col items-center justify-center">
-      <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-xl p-6">
-        <div className="mb-5">
-          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-blue-600 rounded-full"
-              initial={false}
-              animate={{ width: progressWidth }}
-              transition={PROGRESS_SPRING}
-            />
-          </div>
-          <p className="text-xs text-slate-500 mt-2">{stepLabel}</p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex flex-col items-center justify-center px-5 py-8">
+      <div className="w-full max-w-sm flex flex-col gap-6">
 
-        <AnimatePresence mode="wait">
+        {/* Icon hero */}
+        <div className="flex justify-center">
           <motion.div
             key={index}
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -14 }}
-            className="space-y-5"
+            initial={{ scale: 0.7, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+            className={`w-24 h-24 rounded-3xl bg-gradient-to-br ${slide.gradient} flex items-center justify-center shadow-2xl ${slide.glow}`}
           >
-            <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${current.color} text-white flex items-center justify-center shadow-lg`}>
-              {current.icon}
-            </div>
+            {slide.icon}
+          </motion.div>
+        </div>
 
-            <div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">{current.title}</h1>
-              <p className="text-sm text-slate-500 mt-1">{current.subtitle}</p>
-            </div>
-
-            <div className="space-y-2.5">
-              {current.bullets.map((line, bulletIdx) => (
-                <div key={`${index}-${bulletIdx}`} className="flex items-start gap-2.5">
-                  <ShieldCheck className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-slate-700 leading-snug">{line}</p>
-                </div>
-              ))}
-            </div>
+        {/* Text */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={index}
+            initial={{ opacity: 0, x: direction * 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: direction * -30 }}
+            transition={{ duration: 0.22 }}
+            className="text-center space-y-2"
+          >
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">{slide.title}</h1>
+            <p className="text-slate-500 text-sm">{slide.subtitle}</p>
           </motion.div>
         </AnimatePresence>
 
-        <div className="mt-7 grid grid-cols-2 gap-3">
+        {/* Feature list */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={`features-${index}`}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2, delay: 0.05 }}
+            className={`${slide.bg} rounded-3xl p-5 space-y-3`}
+          >
+            {slide.features.map((f, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="text-xl w-7 flex-shrink-0">{f.emoji}</span>
+                <p className="text-sm font-semibold text-slate-700">{f.text}</p>
+              </div>
+            ))}
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Dot indicators */}
+        <div className="flex justify-center gap-2">
+          {SLIDES.map((_, i) => (
+            <motion.div
+              key={i}
+              animate={{ width: i === index ? 24 : 8, opacity: i === index ? 1 : 0.3 }}
+              transition={{ duration: 0.25 }}
+              className={`h-2 rounded-full ${i === index ? `bg-gradient-to-r ${slide.gradient}` : 'bg-slate-300'}`}
+            />
+          ))}
+        </div>
+
+        {/* Buttons */}
+        <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={handleComplete}
-            className="py-3 rounded-2xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-colors"
+            onClick={onComplete}
+            className="py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-600 font-bold text-sm shadow-sm hover:bg-slate-50 transition-colors"
           >
             Skip
           </button>
           {isLast ? (
             <button
-              onClick={handleComplete}
-              className="py-3 rounded-2xl bg-blue-600 text-white font-bold text-sm shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors"
+              onClick={onComplete}
+              className={`py-3.5 rounded-2xl bg-gradient-to-r ${slide.gradient} text-white font-bold text-sm shadow-lg ${slide.glow} flex items-center justify-center gap-2 transition-all`}
             >
-              Start Setup
+              <Check className="w-4 h-4" />
+              Let's Go
             </button>
           ) : (
             <button
-              onClick={handleNext}
-              className="py-3 rounded-2xl bg-blue-600 text-white font-bold text-sm shadow-lg shadow-blue-100 hover:bg-blue-700 transition-colors inline-flex items-center justify-center gap-1"
+              onClick={next}
+              className={`py-3.5 rounded-2xl bg-gradient-to-r ${slide.gradient} text-white font-bold text-sm shadow-lg ${slide.glow} flex items-center justify-center gap-2 transition-all`}
             >
               Next
               <ArrowRight className="w-4 h-4" />

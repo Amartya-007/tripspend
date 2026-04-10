@@ -13,6 +13,22 @@ import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, googleProvider, isFirebaseReady } from '../lib/firebase';
 
+const NATIVE_SIGN_IN_RETRY_DELAY_MS = 700;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+  window.setTimeout(resolve, ms);
+});
+
+const isTransientNoCredentialError = (error: unknown) => {
+  const message = (error as { message?: string })?.message?.toLowerCase() || '';
+  const code = (error as { code?: string })?.code?.toLowerCase() || '';
+  return (
+    message.includes('no credentials')
+    || message.includes('credential is not available')
+    || code.includes('no_credentials')
+  );
+};
+
 export function useFirebaseAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,15 +58,32 @@ export function useFirebaseAuth() {
     }
 
     if (Capacitor.isNativePlatform()) {
-      const nativeResult = await FirebaseAuthentication.signInWithGoogle();
-      const idToken = nativeResult.credential?.idToken;
-      if (!idToken) {
-        throw new Error('Google sign-in succeeded but no ID token was returned.');
+      let lastError: unknown;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+          const idToken = nativeResult.credential?.idToken || null;
+          const accessToken = nativeResult.credential?.accessToken || null;
+
+          if (!idToken && !accessToken) {
+            throw new Error('Google sign-in succeeded but no credentials were returned.');
+          }
+
+          const credential = GoogleAuthProvider.credential(idToken, accessToken);
+          await signInWithCredential(auth, credential);
+          return;
+        } catch (error) {
+          lastError = error;
+          const shouldRetry = attempt === 0 && isTransientNoCredentialError(error);
+          if (!shouldRetry) {
+            throw error;
+          }
+          await sleep(NATIVE_SIGN_IN_RETRY_DELAY_MS);
+        }
       }
 
-      const credential = GoogleAuthProvider.credential(idToken);
-      await signInWithCredential(auth, credential);
-      return;
+      throw lastError;
     }
 
     await signInWithPopup(auth, googleProvider);

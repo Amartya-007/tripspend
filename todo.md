@@ -35,17 +35,17 @@ Status: [x] done, [~] partial, [ ] pending
 - [x] Category filter
 - [x] Amount range (min/max)
 
-### [ ] Add Cloud Sync and Restore
+### [x] Add Cloud Sync and Restore
 - Google sign-in
 - Anonymous token backup
 - Restore on new device
 
-### [ ] Add Multi-Trip Support
+### [x] Add Multi-Trip Support
 - Create multiple trips
 - Switch between trips
 - Archive old trips
 
-### [ ] Add Smart Reminders
+### [x] Add Smart Reminders
 - Daily expense reminders
 - Pending settlement reminders
 
@@ -81,9 +81,6 @@ Status: [x] done, [~] partial, [ ] pending
 - Same amount + same payer within 2 minutes → warning bottom sheet
 - "Add Anyway" or "Cancel" options
 
-### [ ] Add Quick Split Templates
-- Save frequent split groups
-- Reuse with one tap
 
 ### [x] Add Trip Summary Share Card
 - Canvas-generated summary image

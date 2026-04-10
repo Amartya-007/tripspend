@@ -3,11 +3,13 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Expense, TripSetup, getTripCategories, getTripPeople } from '../utils/calculations.ts';
 import { categorizeExpenseWithAI, isAIConfigured } from '../utils/aiCategorization.ts';
 import { formatCurrency } from '../utils/cn';
+import { AMOUNT_MAX, MAX_NOTE_LENGTH, MAX_TAGS_INPUT_LENGTH, MAX_TAGS_COUNT, COUNTER_THRESHOLD } from '../utils/constants.ts';
+import { validateAmount, validateTags, parseTags, showCounter } from '../utils/validation.ts';
 import { IndianRupee, Tag, FileText, Calendar, Plus, Save, AlertCircle, ReceiptText, Image as ImageIcon, X, Camera as CameraIcon, ScanText, Mic, User, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DatePicker } from '../components/DatePicker.tsx';
 import { PeoplePickerSheet } from '../components/PeoplePickerSheet.tsx';
-import { format, isBefore, isValid, parseISO, startOfDay } from 'date-fns';
+import { format, isAfter, isBefore, isValid, parseISO, startOfDay } from 'date-fns';
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
@@ -306,6 +308,8 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const paidByPeople = useMemo(() => (people.length > 0 ? people : ['Trip Wallet']), [people]);
 
   const [amount, setAmount] = useState('');
+
+  const amountError = useMemo(() => validateAmount(amount) ?? '', [amount]);
   const [category, setCategory] = useState<Expense['category']>('Food');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -320,6 +324,26 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const [pendingExpense, setPendingExpense] = useState<Expense | null>(null);
 
   const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(date)), startOfDay(new Date()));
+  const tripStartDate = useMemo(() => (setup?.startDate ? startOfDay(parseISO(setup.startDate)) : null), [setup?.startDate]);
+  const tripEndDate = useMemo(() => (setup?.endDate ? startOfDay(parseISO(setup.endDate)) : null), [setup?.endDate]);
+
+  const isExpenseOutsideTripDates = useMemo(() => {
+    if (isEditing || !tripStartDate || !tripEndDate) return false;
+    const selectedDate = startOfDay(parseISO(date));
+    return isBefore(selectedDate, tripStartDate) || isAfter(selectedDate, tripEndDate);
+  }, [date, isEditing, tripEndDate, tripStartDate]);
+
+  const dateWarningText = useMemo(() => {
+    if (!setup?.startDate || !setup?.endDate) return '';
+    const selectedDate = startOfDay(parseISO(date));
+    if (tripStartDate && isBefore(selectedDate, tripStartDate)) {
+      return `This expense is dated before your trip starts on ${format(parseISO(setup.startDate), 'dd MMM yyyy')}.`;
+    }
+    if (tripEndDate && isAfter(selectedDate, tripEndDate)) {
+      return `This expense is dated after your trip ends on ${format(parseISO(setup.endDate), 'dd MMM yyyy')}.`;
+    }
+    return 'This expense is outside your trip dates.';
+  }, [date, setup?.endDate, setup?.startDate, tripEndDate, tripStartDate]);
 
   useEffect(() => {
     if (isEditing) {
@@ -392,10 +416,27 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!amount || isNaN(parseFloat(amount)) || isLocked) return;
+    if (!amount || isNaN(parseFloat(amount))) {
+      setError('Please enter a valid amount.');
+      return;
+    }
+    if (amountError) {
+      setError(amountError);
+      return;
+    }
+    if (isLocked) {
+      setError('Editing is locked for previous days. Change the date or disable day lock in settings.');
+      return;
+    }
 
     const amountNum = parseFloat(amount);
-    const tags = tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean);
+    if (amountNum <= 0 || amountNum > AMOUNT_MAX) {
+      setError(`Amount must be between ₹0.01 and ₹${AMOUNT_MAX.toLocaleString('en-IN')}.`);
+      return;
+    }
+    const tagsError = validateTags(tagsInput);
+    if (tagsError) { setError(tagsError); return; }
+    const tags = parseTags(tagsInput);
 
     const expenseData: Expense = {
       id: isEditing ? id : crypto.randomUUID(),
@@ -413,14 +454,13 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     };
 
     if (!isEditing) {
-      // Duplicate check
       const dup = findDuplicate(expenses, amountNum, paidBy, date, id);
       if (dup) {
         setPendingExpense(expenseData);
         setShowDuplicateWarning(dup);
         return;
       }
-      // Large expense check (> daily budget per person)
+
       if (dailyLimit > 0 && amountNum > dailyLimit) {
         setPendingExpense(expenseData);
         setShowLargeExpenseConfirm(true);
@@ -434,7 +474,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       onAdd(expenseData);
     }
     navigate('/expenses');
-  }, [amount, isLocked, tagsInput, isEditing, id, category, note, date, paidBy, splitWith, people, receipts, onUpdate, onAdd, navigate, expenses, dailyLimit]);
+  }, [amount, category, dailyLimit, date, expenses, id, isEditing, isLocked, navigate, onAdd, onUpdate, paidBy, people, receipts, splitWith, tagsInput, note]);
 
   const commitExpense = useCallback(() => {
     if (!pendingExpense) return;
@@ -612,8 +652,20 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
-            className="w-full px-4 py-4 text-2xl font-bold rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-50"
+            min="0"
+            max="9999999"
+            step="0.01"
+            className={`w-full px-4 py-4 text-2xl font-bold rounded-2xl border focus:outline-none focus:ring-2 transition-all disabled:opacity-50 ${
+              amountError
+                ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                : 'border-slate-200 focus:ring-blue-500'
+            }`}
           />
+          {amountError && (
+            <p className="mt-1.5 text-xs font-semibold text-red-500 flex items-center gap-1">
+              <span>⚠</span> {amountError}
+            </p>
+          )}
           <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
             {QUICK_AMOUNTS.map(val => (
               <button
@@ -705,8 +757,12 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             value={note}
             onChange={(e) => handleNoteChange(e.target.value)}
             placeholder="What was this for?"
+            maxLength={MAX_NOTE_LENGTH}
             className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
+          {showCounter(note, MAX_NOTE_LENGTH) && (
+            <p className="text-[11px] text-slate-400 mt-1 text-right">{note.length}/{MAX_NOTE_LENGTH}</p>
+          )}
         </div>
 
         <div>
@@ -720,8 +776,13 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             value={tagsInput}
             onChange={(e) => setTagsInput(e.target.value)}
             placeholder="snacks, airport, museum"
+            maxLength={MAX_TAGS_INPUT_LENGTH}
             className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
+          {showCounter(tagsInput, MAX_TAGS_INPUT_LENGTH) && (
+            <p className="text-[11px] text-slate-400 mt-1 text-right">{tagsInput.length}/{MAX_TAGS_INPUT_LENGTH}</p>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">Max {MAX_TAGS_COUNT} tags</p>
         </div>
 
         <div>
@@ -784,6 +845,13 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
             </div>
           )}
         </div>
+
+        {isExpenseOutsideTripDates && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2 text-amber-700 text-xs font-medium">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>{dateWarningText} The expense will still be saved.</span>
+          </div>
+        )}
 
         <button
           type="submit"

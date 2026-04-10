@@ -50,7 +50,7 @@ const ACCENT_STYLES: Record<Accent, { triggerOpen: string; ring: string; button:
   },
 };
 
-export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
+export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = React.memo(({
   people,
   selected,
   onChange,
@@ -81,9 +81,19 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
     return people.filter((person) => person.toLowerCase().includes(q));
   }, [people, searchQuery]);
 
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const avatarColorByPerson = useMemo(() => {
+    const map = new Map<string, string>();
+    for (let i = 0; i < people.length; i += 1) {
+      map.set(people[i], AVATAR_COLOR_CLASSES[i % AVATAR_COLOR_CLASSES.length]);
+    }
+    return map;
+  }, [people]);
+
   const payerIncluded = useMemo(
-    () => !paidBy || selected.includes(paidBy),
-    [paidBy, selected]
+    () => !paidBy || selectedSet.has(paidBy),
+    [paidBy, selectedSet]
   );
 
   const close = useCallback(() => {
@@ -92,7 +102,7 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
   }, []);
 
   const togglePerson = useCallback((person: string) => {
-    const isSelected = selected.includes(person);
+    const isSelected = selectedSet.has(person);
 
     if (mode === 'single') {
       onChange([person]);
@@ -106,7 +116,7 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
     }
 
     onChange([...selected, person]);
-  }, [close, mode, onChange, selected]);
+  }, [close, mode, onChange, selected, selectedSet]);
 
   const selectAll = useCallback(() => {
     onChange([...people]);
@@ -212,9 +222,8 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
                   <div className="px-3 py-8 text-center text-sm font-medium text-slate-400">No members match your search.</div>
                 )}
                 {filteredPeople.map((person, idx) => {
-                  const isSelected = selected.includes(person);
-                  const personIndex = people.indexOf(person);
-                  const avatarColor = AVATAR_COLOR_CLASSES[personIndex % AVATAR_COLOR_CLASSES.length];
+                  const isSelected = selectedSet.has(person);
+                  const avatarColor = avatarColorByPerson.get(person) || AVATAR_COLOR_CLASSES[0];
 
                   return (
                     <React.Fragment key={person}>
@@ -268,4 +277,6 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = ({
       </AnimatePresence>
     </div>
   );
-};
+});
+
+PeoplePickerSheet.displayName = 'PeoplePickerSheet';

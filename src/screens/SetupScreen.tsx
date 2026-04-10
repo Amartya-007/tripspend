@@ -1,11 +1,30 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, IndianRupee, ArrowRight, Lock, Tag, X, Plus } from 'lucide-react';
+import { Users, IndianRupee, ArrowRight, Lock, Tag, X, Plus, Check } from 'lucide-react';
 import { TripSetup } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addDays } from 'date-fns';
 import { DatePicker } from '../components/DatePicker.tsx';
+import { Capacitor } from '@capacitor/core';
+import { Contacts, ContactPayload } from '@capacitor-community/contacts';
+import {
+  MAX_TRIP_NAME_LENGTH,
+  MAX_PARTICIPANT_NAME_LENGTH,
+  MAX_CATEGORY_NAME_LENGTH,
+  MIN_PEOPLE,
+  MAX_PEOPLE,
+  MAX_BUDGET_PER_PERSON,
+  DEFAULT_CATEGORIES,
+  BUDGET_REGEX,
+} from '../utils/constants.ts';
+import { isDuplicate, sanitize } from '../utils/validation.ts';
+
+type MemberContactChoice = {
+  contactId: string;
+  name: string;
+  phoneNumber: string;
+};
 
 interface SetupScreenProps {
   onSave: (setup: TripSetup) => void;
@@ -14,24 +33,39 @@ interface SetupScreenProps {
   initialTripName?: string;
 }
 
-const DEFAULT_CATEGORIES = ['Food', 'Travel', 'Stay', 'Misc'];
 const STEPS = ['people-count', 'people-names', 'budget', 'dates', 'categories'] as const;
-const MIN_PEOPLE = 1;
-const MAX_PEOPLE = 20;
-const MAX_BUDGET_PER_PERSON = 10000000;
-const BUDGET_REGEX = /^\d*(?:\.\d{0,2})?$/;
 
 export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, onNameTrip, initialTripName }) => {
   const [step, setStep] = useState<'people-count' | 'people-names' | 'budget' | 'dates' | 'categories'>('people-count');
   const [peopleCount, setPeopleCount] = useState(initialData?.peopleCount?.toString() || '');
   const [participants, setParticipants] = useState<string[]>(initialData?.participants || []);
+  const [participantPhoneNumbers, setParticipantPhoneNumbers] = useState<Record<string, string>>(() => {
+    const phoneByName = initialData?.participantPhoneNumbers || {};
+    const initialParticipants = initialData?.participants || [];
+    const byIndex: Record<string, string> = {};
+
+    for (let i = 0; i < initialParticipants.length; i += 1) {
+      const name = initialParticipants[i]?.trim();
+      if (!name) continue;
+      const phone = phoneByName[name];
+      if (phone) byIndex[String(i)] = phone;
+    }
+
+    return byIndex;
+  });
   const [budget, setBudget] = useState(initialData?.budgetPerPerson?.toString() || '');
   const [startDate, setStartDate] = useState(initialData?.startDate || format(new Date(), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(initialData?.endDate || format(addDays(new Date(), 3), 'yyyy-MM-dd'));
   const [lockPrevious, setLockPrevious] = useState(initialData?.lockPreviousDays || false);
-  const [categories, setCategories] = useState<string[]>(initialData?.customCategories || DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState<string[]>(initialData?.customCategories || [...DEFAULT_CATEGORIES]);
   const [newCategory, setNewCategory] = useState('');
   const [tripName, setTripName] = useState(initialTripName || '');
+  const [memberContactPickerOpen, setMemberContactPickerOpen] = useState(false);
+  const [memberContactPickerLoading, setMemberContactPickerLoading] = useState(false);
+  const [memberContactPickerError, setMemberContactPickerError] = useState('');
+  const [memberContactSearch, setMemberContactSearch] = useState('');
+  const [memberContactChoices, setMemberContactChoices] = useState<MemberContactChoice[]>([]);
+  const [selectedMemberContactIds, setSelectedMemberContactIds] = useState<string[]>([]);
 
   const navigate = useNavigate();
 
@@ -39,10 +73,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   const budgetNum = useMemo(() => parseFloat(budget) || 0, [budget]);
   const totalBudget = useMemo(() => peopleNum * budgetNum, [peopleNum, budgetNum]);
   const trimmedNewCategory = useMemo(() => newCategory.trim(), [newCategory]);
-  const categoriesSet = useMemo(() => new Set(categories), [categories]);
-  const canAddCategory = useMemo(() => Boolean(trimmedNewCategory) && !categoriesSet.has(trimmedNewCategory), [trimmedNewCategory, categoriesSet]);
+  const canAddCategory = useMemo(() => Boolean(trimmedNewCategory) && trimmedNewCategory.length <= MAX_CATEGORY_NAME_LENGTH && !isDuplicate(trimmedNewCategory, categories), [trimmedNewCategory, categories]);
   const needsParticipantRemoval = useMemo(() => participants.length > peopleNum, [participants.length, peopleNum]);
   const currentStepIndex = useMemo(() => STEPS.indexOf(step), [step]);
+  const maxContactSelections = useMemo(() => Math.max(0, peopleNum - 1), [peopleNum]);
+  const selectedMemberContacts = useMemo(() => {
+    const selectedIds = new Set(selectedMemberContactIds);
+    return memberContactChoices.filter((contact) => selectedIds.has(contact.contactId));
+  }, [memberContactChoices, selectedMemberContactIds]);
 
   useEffect(() => {
     if (endDate < startDate) {
@@ -55,15 +93,23 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
       alert(`Please enter between ${MIN_PEOPLE} and ${MAX_PEOPLE} people.`);
       return;
     }
+    if (!initialData) {
+      const cleanName = tripName.trim();
+      if (!cleanName) {
+        alert('Please name your trip before continuing.');
+        return;
+      }
+    }
     if (peopleNum >= participants.length) {
       setParticipants(prev =>
-        Array.from({ length: peopleNum }, (_, i) =>
-          prev[i]?.trim() ? prev[i] : `Person ${i + 1}`
-        )
+        Array.from({ length: peopleNum }, (_, i) => {
+          if (i === 0) return prev[0]?.trim() || 'You';
+          return prev[i]?.trim() || `Person ${i + 1}`;
+        })
       );
     }
     setStep('people-names');
-  }, [peopleNum, participants.length]);
+  }, [initialData, peopleNum, participants.length, tripName]);
 
   const updateParticipantName = useCallback((index: number, name: string) => {
     const updated = [...participants];
@@ -73,11 +119,151 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
 
   const removeParticipant = useCallback((idx: number) => {
     setParticipants(prev => prev.filter((_, i) => i !== idx));
+    setParticipantPhoneNumbers((prev) => {
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        const oldIndex = Number(key);
+        if (!Number.isInteger(oldIndex)) continue;
+        if (oldIndex === idx) continue;
+        const newIndex = oldIndex > idx ? oldIndex - 1 : oldIndex;
+        next[String(newIndex)] = value;
+      }
+      return next;
+    });
   }, []);
+
+  const readContactDisplayName = useCallback((contact: ContactPayload) => {
+    const name = contact.name;
+    if (!name) return '';
+    const display = (name.display || '').trim();
+    if (display) return display;
+    return [name.given, name.middle, name.family].filter(Boolean).join(' ').trim();
+  }, []);
+
+  const closeMemberContactPicker = useCallback(() => {
+    setMemberContactPickerOpen(false);
+    setMemberContactPickerLoading(false);
+    setMemberContactPickerError('');
+    setMemberContactSearch('');
+    setMemberContactChoices([]);
+    setSelectedMemberContactIds([]);
+  }, []);
+
+  const buildContactChoice = useCallback((contact: ContactPayload): MemberContactChoice => {
+    const name = readContactDisplayName(contact);
+    const phoneNumber = contact.phones?.find((phone) => Boolean(phone?.number))?.number?.trim() || '';
+    return {
+      contactId: contact.contactId?.trim() || `${name || phoneNumber}-${phoneNumber}`,
+      name: name || phoneNumber,
+      phoneNumber,
+    };
+  }, [readContactDisplayName]);
+
+  const applyContactsToParticipants = useCallback((contacts: MemberContactChoice[]) => {
+    // Contacts fill slots 1..N — slot 0 is always "You"
+    const limitedContacts = contacts.slice(0, peopleNum - 1);
+
+    setParticipants((prev) =>
+      Array.from({ length: peopleNum }, (_, index) => {
+        if (index === 0) return prev[0]?.trim() || 'You';
+        const pickedContact = limitedContacts[index - 1];
+        return pickedContact?.name?.trim() || prev[index]?.trim() || `Person ${index + 1}`;
+      })
+    );
+
+    setParticipantPhoneNumbers(() => {
+      const next: Record<string, string> = {};
+      limitedContacts.forEach((contact, index) => {
+        const phone = contact.phoneNumber.trim();
+        // index 0 in contacts → participant index 1
+        if (phone) next[String(index + 1)] = phone;
+      });
+      return next;
+    });
+
+    closeMemberContactPicker();
+  }, [closeMemberContactPicker, peopleNum]);
+
+  const toggleMemberContactSelection = useCallback((contactId: string) => {
+    if (maxContactSelections === 0) return;
+
+    setSelectedMemberContactIds((prev) => (
+      prev.includes(contactId)
+        ? prev.filter((id) => id !== contactId)
+        : prev.length >= maxContactSelections
+          ? prev
+          : [...prev, contactId]
+    ));
+  }, [maxContactSelections]);
+
+  const openMemberContactsPicker = useCallback(async () => {
+    if (!Capacitor.isNativePlatform()) {
+      alert('Contact picker is available on native app builds only.');
+      return;
+    }
+
+    try {
+      setMemberContactPickerError('');
+      setMemberContactPickerLoading(true);
+
+      let permission = await Contacts.checkPermissions();
+      if (permission.contacts !== 'granted' && permission.contacts !== 'limited') {
+        permission = await Contacts.requestPermissions();
+      }
+
+      if (permission.contacts !== 'granted' && permission.contacts !== 'limited') {
+        alert('Contacts permission denied. You can still enter names manually.');
+        return;
+      }
+
+      const response = await Contacts.getContacts({
+        projection: {
+          name: true,
+          phones: true,
+        },
+      });
+
+      const contacts = (response.contacts || [])
+        .map(buildContactChoice)
+        .filter((contact) => Boolean(contact.name || contact.phoneNumber));
+
+      if (contacts.length === 0) {
+        setMemberContactPickerError('No contacts with names or phone numbers were found on this device.');
+        return;
+      }
+
+      setMemberContactChoices(contacts);
+      setSelectedMemberContactIds([]);
+      setMemberContactPickerOpen(true);
+    } catch (error) {
+      console.error('Failed to load contacts', error);
+      setMemberContactPickerError('Could not load contacts on this device. You can still type names manually.');
+      alert('Could not load contacts. You can still type names manually.');
+    } finally {
+      setMemberContactPickerLoading(false);
+    }
+  }, [buildContactChoice]);
+
+  const applySelectedMemberContacts = useCallback(() => {
+    if (selectedMemberContacts.length === 0) {
+      setMemberContactPickerError('Select at least 1 contact, or close and type names manually.');
+      return;
+    }
+
+    applyContactsToParticipants(selectedMemberContacts);
+  }, [applyContactsToParticipants, selectedMemberContacts]);
+
+  const filteredContacts = useMemo(() => {
+    const query = memberContactSearch.trim().toLowerCase();
+    if (!query) return memberContactChoices;
+    return memberContactChoices.filter((contact) => (
+      contact.name.toLowerCase().includes(query) || contact.phoneNumber.toLowerCase().includes(query)
+    ));
+  }, [memberContactChoices, memberContactSearch]);
 
   const handleAddCategory = useCallback(() => {
     if (canAddCategory) {
-      setCategories([...categories, trimmedNewCategory]);
+      setCategories([...categories, sanitize(trimmedNewCategory)]);
       setNewCategory('');
     }
   }, [canAddCategory, categories, trimmedNewCategory]);
@@ -120,11 +306,17 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
         endDate,
         lockPreviousDays: lockPrevious,
         participants: participants.filter(p => p.trim()),
+        participantPhoneNumbers: participants.reduce<Record<string, string>>((acc, person, index) => {
+          const name = person.trim();
+          const phone = participantPhoneNumbers[String(index)]?.trim();
+          if (name && phone) acc[name] = phone;
+          return acc;
+        }, {}),
         customCategories: categories.filter(c => c.trim()),
       });
       navigate('/');
     }
-  }, [budgetNum, categories, endDate, initialData, lockPrevious, navigate, onNameTrip, onSave, participants, peopleNum, startDate, totalBudget, tripName]);
+  }, [budgetNum, categories, endDate, initialData, lockPrevious, navigate, onNameTrip, onSave, participantPhoneNumbers, participants, peopleNum, startDate, totalBudget, tripName]);
 
   const handlePeopleCountChange = useCallback((value: string) => {
     const digitsOnly = value.replace(/\D/g, '');
@@ -154,7 +346,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   }, []);
 
   const handleTripNameChange = useCallback((value: string) => {
-    setTripName(value);
+    setTripName(value.slice(0, MAX_TRIP_NAME_LENGTH));
   }, []);
 
   const toggleLockPrevious = useCallback(() => {
@@ -200,8 +392,22 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
             <motion.div key="people-count" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
               <div className="text-center mb-8">
                 <h1 className="text-3xl font-black bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">Trip Setup</h1>
-                <p className="text-slate-500 mt-2 text-sm">Who's joining the trip?</p>
+                <p className="text-slate-500 mt-2 text-sm">Name the trip, then choose who is joining</p>
               </div>
+              {!initialData && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Trip Name</label>
+                  <input
+                    type="text"
+                    value={tripName}
+                    onChange={(e) => handleTripNameChange(e.target.value)}
+                    placeholder="e.g. Goa Friends 2026"
+                    maxLength={MAX_TRIP_NAME_LENGTH}
+                    className="input-field text-sm"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1 text-right">{tripName.length}/{MAX_TRIP_NAME_LENGTH}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <div className="w-5 h-5 bg-blue-100 rounded flex items-center justify-center">
@@ -232,6 +438,26 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                 <p className="text-slate-500 mt-1 text-sm">Enter names for each participant</p>
               </div>
 
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Speed up with contacts</p>
+                  <p className="text-xs text-slate-600 mt-1">Person 1 is you. Select up to {maxContactSelections} contact{maxContactSelections === 1 ? '' : 's'} for the rest, then tap OK.</p>
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={() => { void openMemberContactsPicker(); }}
+                  className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE || maxContactSelections === 0}
+                >
+                  Select from Contacts
+                </motion.button>
+                {maxContactSelections === 0 && (
+                  <p className="text-xs text-slate-500">Only 1 participant selected, so no extra contacts are needed.</p>
+                )}
+              </div>
+
               {needsParticipantRemoval && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-semibold text-amber-700 text-center">
                   Remove {participants.length - peopleNum} person{participants.length - peopleNum > 1 ? 's' : ''} to match your count of {peopleNum}
@@ -249,17 +475,23 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                       exit={{ opacity: 0, x: -20 }}
                       className="flex items-center gap-2"
                     >
-                      <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-xs font-black text-blue-600 flex-shrink-0">
-                        {idx + 1}
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0 ${idx === 0 ? 'bg-blue-600 text-white' : 'bg-blue-50 border border-blue-100 text-blue-600'}`}>
+                        {idx === 0 ? '★' : idx + 1}
                       </div>
-                      <input
-                        type="text"
-                        value={name}
-                        onChange={(e) => updateParticipantName(idx, e.target.value)}
-                        placeholder={`Person ${idx + 1}`}
-                        className="input-field text-sm flex-1"
-                      />
-                      {needsParticipantRemoval && (
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          value={name}
+                          onChange={(e) => updateParticipantName(idx, e.target.value.slice(0, MAX_PARTICIPANT_NAME_LENGTH))}
+                          placeholder={idx === 0 ? 'You (your name)' : `Person ${idx + 1}`}
+                          maxLength={MAX_PARTICIPANT_NAME_LENGTH}
+                          className={`input-field text-sm w-full ${idx === 0 ? 'border-blue-300 bg-blue-50/50 font-semibold' : ''}`}
+                        />
+                        {idx === 0 && (
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded-full pointer-events-none">You</span>
+                        )}
+                      </div>
+                      {needsParticipantRemoval && idx !== 0 && (
                         <motion.button
                           whileTap={{ scale: 0.9 }}
                           type="button"
@@ -268,6 +500,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                         >
                           <X className="w-3.5 h-3.5" />
                         </motion.button>
+                      )}
+                      {needsParticipantRemoval && idx === 0 && (
+                        <div className="w-8 h-8 flex-shrink-0" />
                       )}
                     </motion.div>
                   ))}
@@ -378,24 +613,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                   ))}
                 </AnimatePresence>
               </div>
-              {!initialData && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2.5">Trip Name</label>
-                  <input
-                    type="text"
-                    value={tripName}
-                    onChange={(e) => handleTripNameChange(e.target.value)}
-                    placeholder="e.g. Goa Friends 2026"
-                    className="input-field text-sm"
-                  />
-                </div>
-              )}
               <div className="flex gap-2">
                 <input
                   type="text" value={newCategory}
                   onChange={(e) => handleNewCategoryChange(e.target.value)}
                   placeholder="Add new category..."
                   onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+                  maxLength={MAX_CATEGORY_NAME_LENGTH}
                   className="input-field flex-1 text-sm"
                 />
                 <button onClick={handleAddCategory} disabled={!canAddCategory} className="px-4 py-2 bg-blue-600 disabled:bg-slate-200 text-white rounded-xl hover:bg-blue-700 transition-colors">
@@ -411,6 +635,108 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
             </motion.div>
           )}
 
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {memberContactPickerOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/45 z-50"
+                onClick={closeMemberContactPicker}
+              />
+              <motion.div
+                initial={{ y: '100%' }}
+                animate={{ y: 0 }}
+                exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 24, stiffness: 260 }}
+                className="fixed bottom-0 left-0 right-0 z-[60] bg-white rounded-t-3xl shadow-2xl max-w-md mx-auto"
+                style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+              >
+                <div className="px-5 pt-4 pb-3 border-b border-slate-100">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Pick Contacts</p>
+                      <p className="text-sm font-semibold text-slate-900 mt-0.5">Select multiple members at once</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeMemberContactPicker}
+                      className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={memberContactSearch}
+                    onChange={(e) => setMemberContactSearch(e.target.value)}
+                    placeholder="Search contacts"
+                    className="mt-3 w-full input-field text-sm"
+                  />
+                  {memberContactPickerError && (
+                    <p className="mt-2 text-xs text-rose-600 font-medium">{memberContactPickerError}</p>
+                  )}
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto p-3 space-y-2">
+                  {memberContactPickerLoading && (
+                    <div className="px-4 py-10 text-center text-sm text-slate-500">
+                      Loading contacts...
+                    </div>
+                  )}
+                  {filteredContacts.map((contact) => (
+                    <button
+                      key={contact.contactId}
+                      type="button"
+                      onClick={() => toggleMemberContactSelection(contact.contactId)}
+                      disabled={!selectedMemberContactIds.includes(contact.contactId) && selectedMemberContactIds.length >= maxContactSelections}
+                      className={`w-full text-left px-4 py-3 rounded-2xl border transition-colors flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed ${selectedMemberContactIds.includes(contact.contactId) ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                    >
+                      <div className="flex-shrink-0 text-blue-600">
+                        {selectedMemberContactIds.includes(contact.contactId) ? <Check className="w-4 h-4" /> : <X className="w-4 h-4 opacity-0" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 text-sm truncate">{contact.name || 'Unnamed contact'}</p>
+                        <p className="text-xs text-slate-500 mt-1 truncate">{contact.phoneNumber || 'No phone number'}</p>
+                      </div>
+                    </button>
+                  ))}
+                  {!memberContactPickerLoading && filteredContacts.length === 0 && (
+                    <div className="px-4 py-8 text-center text-sm text-slate-500">
+                      No matching contacts.
+                    </div>
+                  )}
+                  {!memberContactPickerLoading && !memberContactPickerError && memberContactChoices.length > 0 && filteredContacts.length === 0 && (
+                    <div className="px-4 py-2 text-center text-xs text-slate-400">
+                      Try a different search.
+                    </div>
+                  )}
+                </div>
+                <div className="px-5 pt-3 border-t border-slate-100 flex items-center gap-3">
+                  <div className="flex-1 text-xs text-slate-500">
+                    {selectedMemberContacts.length} selected (max {maxContactSelections})
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeMemberContactPicker}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applySelectedMemberContacts}
+                    disabled={selectedMemberContacts.length === 0}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    OK
+                  </button>
+                </div>
+              </motion.div>
+            </>
+          )}
         </AnimatePresence>
       </motion.div>
     </div>

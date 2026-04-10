@@ -49,6 +49,8 @@ const normalizeSetup = (setup: TripSetup | null): TripSetup | null => {
     endDate: raw.endDate,
     lockPreviousDays: Boolean(raw.lockPreviousDays),
     participants,
+    participantPhoneNumbers: raw.participantPhoneNumbers || {},
+    participantUpiIds: raw.participantUpiIds || {},
     customCategories,
   };
 };
@@ -169,6 +171,9 @@ const migrateOldFormat = (): Trip | null => {
 
 export function useTripData() {
   const [lastDeletedExpense, setLastDeletedExpense] = useState<Expense | null>(null);
+  // Tracks whether the async IndexedDB hydration has completed (or failed).
+  // Until true, the app should not make routing decisions based on `data.setup`.
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const [presets, setPresets] = useState<QuickAddPreset[]>(() => {
     const parsed = readStoredObject<QuickAddPreset[]>(PRESETS_KEY);
@@ -283,12 +288,28 @@ export function useTripData() {
         ]);
 
         if (!cancelled && Array.isArray(savedTrips) && savedTrips.length > 0) {
-          setTrips(savedTrips.map((trip) => ({
-            ...trip,
-            updatedAt: trip.updatedAt || trip.createdAt || nowIso(),
-            data: normalizeData(trip.data),
-          })));
-          setActiveTrip((prev) => (prev && savedTrips.some((trip) => trip.id === prev) ? prev : savedTrips[0].id));
+          setTrips(prev => {
+            // Only hydrate if IDB has more trips or more recent data than current state
+            // This prevents IDB from overwriting freshly-added expenses
+            const idbTotal = savedTrips.reduce((s, t) => s + t.data.expenses.length, 0);
+            const currentTotal = prev.reduce((s, t) => s + t.data.expenses.length, 0);
+            const idbUpdated = Math.max(...savedTrips.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()));
+            const currentUpdated = Math.max(...prev.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()), 0);
+
+            // Prefer whichever has more data, or if equal prefer more recent
+            if (idbTotal > currentTotal || (idbTotal === currentTotal && idbUpdated > currentUpdated)) {
+              return savedTrips.map((trip) => ({
+                ...trip,
+                updatedAt: trip.updatedAt || trip.createdAt || nowIso(),
+                data: normalizeData(trip.data),
+              }));
+            }
+            return prev;
+          });
+          setActiveTrip((prev) => {
+            if (prev && savedTrips.some((trip) => trip.id === prev)) return prev;
+            return savedTrips[0].id;
+          });
         }
 
         if (!cancelled && Array.isArray(savedPresets)) {
@@ -296,6 +317,8 @@ export function useTripData() {
         }
       } catch (error) {
         console.error('IndexedDB hydration failed', error);
+      } finally {
+        if (!cancelled) setIsHydrated(true);
       }
     };
 
@@ -500,6 +523,10 @@ export function useTripData() {
     return newTrip.id;
   }, []);
 
+  const joinTrip = useCallback(async (_tripId: string) => {
+    return false;
+  }, []);
+
   const deleteTrip = useCallback((tripId: string) => {
     setTrips(prev => {
       const filtered = prev.filter(t => t.id !== tripId);
@@ -586,6 +613,7 @@ export function useTripData() {
   return {
     // Single trip interface (for backward compatibility)
     data,
+    isHydrated,
     presets,
     saveSetup,
     addExpense,
@@ -605,6 +633,7 @@ export function useTripData() {
     trips,
     activeTrip,
     createTrip,
+    joinTrip,
     deleteTrip,
     renameTrip,
     setActiveTripId,

@@ -8,6 +8,14 @@ const config: CapacitorConfig = {
     FirebaseAuthentication: {
       providers: ['google.com'],
     },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
+    LocalNotifications: {
+      smallIcon: 'ic_launcher',
+      iconColor: '#2563eb',
+      sound: 'default',
+    },
   },
 };
 

@@ -27,6 +27,7 @@ yarn-error.log*
 *.ntvs*
 *.njsproj
 *.sln
+.firebase/
 
 # TypeScript
 *.tsbuildinfo
@@ -40,6 +41,10 @@ android/key.properties
 *.jks
 *.keystore
 
+# Firebase config — contains API keys, do not commit
+android/app/google-services.json
+ios/GoogleService-Info.plist
+
 # Capacitor
 android/app/src/main/assets/public/
 
@@ -47,3 +52,21 @@ android/app/src/main/assets/public/
 ios/App/Pods/
 ios/App/App/public/
 *.xcworkspace/xcuserdata/
+
+# Local security rules notes
+/rule.md
+
+# AI assistant config files (Cursor, Claude, Windsurf, OpenCode, etc.)
+.kiro
+.vscode
+.cursorrules
+.windsurfrules
+.opencode.json
+.code-review-graph
+.mcp.json
+.claude/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+COPILOT.md
+todo.md

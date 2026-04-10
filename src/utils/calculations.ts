@@ -8,6 +8,7 @@ export interface TripSetup {
   endDate: string;
   lockPreviousDays: boolean;
   participants?: string[];
+  participantPhoneNumbers?: Record<string, string>;
   participantUpiIds?: Record<string, string>;
   customCategories?: string[];
 }
@@ -92,6 +93,25 @@ export const getTripCategories = (setup: TripSetup | null): string[] => {
 const toRounded = (value: number) => Math.round(value * 100) / 100;
 const EPSILON = 0.01;
 
+const mergeTransfers = (transfers: SettlementTransfer[]): SettlementTransfer[] => {
+  const map = new Map<string, number>();
+
+  for (let i = 0; i < transfers.length; i += 1) {
+    const transfer = transfers[i];
+    const key = `${transfer.from}|${transfer.to}`;
+    map.set(key, toRounded((map.get(key) || 0) + transfer.amount));
+  }
+
+  const merged: SettlementTransfer[] = [];
+  map.forEach((amount, key) => {
+    if (amount <= EPSILON) return;
+    const [from, to] = key.split('|');
+    merged.push({ from, to, amount: toRounded(amount) });
+  });
+
+  return merged;
+};
+
 const getShareMap = (expense: Expense, peopleInExpense: string[]): Record<string, number> => {
   if (peopleInExpense.length === 0) return {};
 
@@ -164,38 +184,71 @@ export const calculateSettlement = (
     }
   }
 
-  debtors.sort((a, b) => b.amount - a.amount);
-  creditors.sort((a, b) => b.amount - a.amount);
-
   const transfers: SettlementTransfer[] = [];
 
-  let d = 0;
-  let c = 0;
+  while (debtors.length > 0 && creditors.length > 0) {
+    // Drop settled rows to keep loops tight.
+    for (let i = debtors.length - 1; i >= 0; i -= 1) {
+      if (debtors[i].amount <= EPSILON) debtors.splice(i, 1);
+    }
+    for (let i = creditors.length - 1; i >= 0; i -= 1) {
+      if (creditors[i].amount <= EPSILON) creditors.splice(i, 1);
+    }
 
-  while (d < debtors.length && c < creditors.length) {
-    const debtor = debtors[d];
-    const creditor = creditors[c];
+    if (debtors.length === 0 || creditors.length === 0) break;
 
-    const amount = Math.min(debtor.amount, creditor.amount);
+    // First try exact pairing to reduce transfer count.
+    let exactMatched = false;
+    for (let d = 0; d < debtors.length && !exactMatched; d += 1) {
+      for (let c = 0; c < creditors.length; c += 1) {
+        if (Math.abs(debtors[d].amount - creditors[c].amount) > EPSILON) continue;
+
+        const amount = Math.min(debtors[d].amount, creditors[c].amount);
+        transfers.push({
+          from: debtors[d].person,
+          to: creditors[c].person,
+          amount: toRounded(amount)
+        });
+
+        debtors[d].amount = 0;
+        creditors[c].amount = 0;
+        exactMatched = true;
+        break;
+      }
+    }
+
+    if (exactMatched) continue;
+
+    // Fall back to max debtor vs max creditor.
+    let debtorIndex = 0;
+    for (let i = 1; i < debtors.length; i += 1) {
+      if (debtors[i].amount > debtors[debtorIndex].amount) debtorIndex = i;
+    }
+
+    let creditorIndex = 0;
+    for (let i = 1; i < creditors.length; i += 1) {
+      if (creditors[i].amount > creditors[creditorIndex].amount) creditorIndex = i;
+    }
+
+    const amount = Math.min(debtors[debtorIndex].amount, creditors[creditorIndex].amount);
 
     if (amount > EPSILON) {
       transfers.push({
-        from: debtor.person,
-        to: creditor.person,
+        from: debtors[debtorIndex].person,
+        to: creditors[creditorIndex].person,
         amount: toRounded(amount)
       });
     }
 
-    debtor.amount = toRounded(debtor.amount - amount);
-    creditor.amount = toRounded(creditor.amount - amount);
-
-    if (debtor.amount <= EPSILON) d++;
-    if (creditor.amount <= EPSILON) c++;
+    debtors[debtorIndex].amount = toRounded(debtors[debtorIndex].amount - amount);
+    creditors[creditorIndex].amount = toRounded(creditors[creditorIndex].amount - amount);
   }
 
+  const optimizedTransfers = mergeTransfers(transfers);
+
   let total = 0;
-  for (let i = 0; i < transfers.length; i++) {
-    total += transfers[i].amount;
+  for (let i = 0; i < optimizedTransfers.length; i++) {
+    total += optimizedTransfers[i].amount;
   }
 
   const roundedBalances: Record<string, number> = {};
@@ -205,7 +258,7 @@ export const calculateSettlement = (
 
   return {
     balances: roundedBalances,
-    transfers,
+    transfers: optimizedTransfers,
     totalToSettle: toRounded(total)
   };
 };

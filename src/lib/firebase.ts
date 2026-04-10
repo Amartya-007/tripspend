@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -27,7 +27,16 @@ export const firebaseApp = hasFirebaseConfig
   : null;
 
 export const auth = firebaseApp ? getAuth(firebaseApp) : null;
-export const firestore = firebaseApp ? getFirestore(firebaseApp) : null;
+export const firestore = (() => {
+  if (!firebaseApp) return null;
+  try {
+    return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache(),
+    });
+  } catch {
+    return getFirestore(firebaseApp);
+  }
+})();
 export const storage = firebaseApp ? getStorage(firebaseApp) : null;
 
 export const googleProvider = new GoogleAuthProvider();

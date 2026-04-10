@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { TripData, getTripCategories, getTripPeople, calculateStats, calculateSettlement } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 import { motion } from 'motion/react';
-import { TrendingUp, PieChart, BarChart3, Users, AlertTriangle, Zap, Crown, Trophy, Receipt } from 'lucide-react';
+import { AlertTriangle ,TrendingUp} from 'lucide-react';
 import { differenceInDays, parseISO } from 'date-fns';
 import { loadSettledTransfers, pruneStale } from '../utils/settlements.ts';
 
@@ -146,6 +146,8 @@ export const Analytics: React.FC<Props> = ({ data }) => {
     : healthScore >= 50 ? { text: 'text-orange-500', bg: 'bg-orange-50', bar: 'bg-orange-500', label: 'Fair' }
     : { text: 'text-red-500', bg: 'bg-red-50', bar: 'bg-red-500', label: 'At Risk' };
 
+  const tripStart = useMemo(() => (data.setup?.startDate ? parseISO(data.setup.startDate) : null), [data.setup]);
+
   if (!stats) {
     return (
       <div className="page-shell flex items-center justify-center py-24">
@@ -179,7 +181,6 @@ export const Analytics: React.FC<Props> = ({ data }) => {
   }
 
   const total = stats.totalSpent;
-  const tripStart = useMemo(() => (data.setup?.startDate ? parseISO(data.setup.startDate) : null), [data.setup?.startDate]);
 
   return (
     <div className="page-shell space-y-5">
@@ -192,10 +193,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {smartInsights.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
           className="bg-gradient-to-br from-blue-600 to-blue-700 p-5 rounded-3xl text-white shadow-xl shadow-blue-200">
-          <div className="flex items-center gap-2 mb-3">
-            <Zap className="w-4 h-4 text-yellow-300 fill-yellow-300" />
-            <p className="font-bold">Smart Insights</p>
-          </div>
+          <p className="font-bold mb-3">Smart Insights</p>
           <div className="space-y-2">
             {smartInsights.map((line, i) => (
               <div key={i} className="flex items-start gap-2">
@@ -210,10 +208,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {/* Burn Rate */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
         className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp className="w-5 h-5 text-blue-600" />
-          <p className="font-bold text-slate-900">Burn Rate</p>
-        </div>
+        <p className="font-bold text-slate-900 mb-4">Burn Rate</p>
         <div className="grid grid-cols-2 gap-3">
           {([
             { label: 'Current Daily', value: formatCurrency(stats.dailyBurnRate), sub: 'actual spend/day', warn: stats.dailyBurnRate > stats.remainingPerDay },
@@ -234,19 +229,16 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {personStats.length > 1 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
           className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 pt-5 pb-2">
-            <Users className="w-5 h-5 text-blue-600" />
-            <p className="font-bold text-slate-900">Per Person</p>
-          </div>
+          <p className="font-bold text-slate-900 px-5 pt-5 pb-2">Per Person</p>
           <div className="flex gap-2 px-5 pb-3 flex-wrap">
             {topSpender && (
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 border border-amber-100 text-[10px] font-bold text-amber-700">
-                <Crown className="w-3 h-3" />{topSpender.name} top spender
+                {topSpender.name} top spender
               </span>
             )}
             {mostOwed && mostOwed.net > 0.01 && (
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-50 border border-green-100 text-[10px] font-bold text-green-700">
-                <Trophy className="w-3 h-3" />{mostOwed.name} most owed
+                {mostOwed.name} most owed
               </span>
             )}
           </div>
@@ -277,10 +269,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {categoryBreakdown.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <PieChart className="w-5 h-5 text-blue-600" />
-            <p className="font-bold text-slate-900">Category Breakdown</p>
-          </div>
+          <p className="font-bold text-slate-900 mb-4">Category Breakdown</p>
           <div className="space-y-3">
             {categoryBreakdown.map((item, idx) => {
               const pct = total > 0 ? (item.amount / total) * 100 : 0;
@@ -315,10 +304,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {dailyTimeline.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
           className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="w-5 h-5 text-blue-600" />
-            <p className="font-bold text-slate-900">Daily Timeline</p>
-          </div>
+          <p className="font-bold text-slate-900 mb-4">Daily Timeline</p>
           <div className="space-y-2.5">
             {dailyTimeline.map((day, idx) => {
               const pct = maxDaily > 0 ? (day.amount / maxDaily) * 100 : 0;
@@ -361,10 +347,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       {topExpenses.length > 0 && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
           className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
-            <Receipt className="w-5 h-5 text-blue-600" />
-            <p className="font-bold text-slate-900">Top Expenses</p>
-          </div>
+          <p className="font-bold text-slate-900 px-5 pt-5 pb-3">Top Expenses</p>
           {topExpenses.map((exp, idx) => (
             <React.Fragment key={exp.id}>
               {idx > 0 && <div className="h-px bg-slate-50 mx-5" />}

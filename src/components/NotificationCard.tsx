@@ -6,6 +6,8 @@ export type NotificationVariant = 'success' | 'error' | 'info' | 'warning';
 export interface NotificationPayload {
   title: string;
   message?: string;
+  body?: string;
+  data?: Record<string, unknown>;
   variant?: NotificationVariant;
   durationMs?: number;
 }
@@ -59,8 +61,8 @@ export function NotificationCard({ notification, onClose }: NotificationCardProp
               <span className={`mt-1 w-2.5 h-2.5 rounded-full ${variantStyle[notification.variant ?? 'info'].dot}`} />
               <div className="min-w-0 flex-1">
                 <p className={`text-sm font-bold ${variantStyle[notification.variant ?? 'info'].title}`}>{notification.title}</p>
-                {notification.message && (
-                  <p className="mt-1 text-xs text-slate-600 leading-5">{notification.message}</p>
+                {(notification.body || notification.message) && (
+                  <p className="mt-1 text-xs text-slate-600 leading-5">{notification.body || notification.message}</p>
                 )}
               </div>
               <button
