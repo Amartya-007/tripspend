@@ -38,10 +38,10 @@ const save = (transfers: SettledTransfer[]) => {
 const matches = (a: SettledTransfer, from: string, to: string, amount: number) =>
   a.from === from && a.to === to && roundAmount(a.amount) === roundAmount(amount);
 
-export const isSettled = (settled: SettledTransfer[], from: string, to: string, amount: number) =>
+const isSettled = (settled: SettledTransfer[], from: string, to: string, amount: number) =>
   settled.some(s => matches(s, from, to, amount));
 
-export const markSettled = (settled: SettledTransfer[], from: string, to: string, amount: number): SettledTransfer[] => {
+const markSettled = (settled: SettledTransfer[], from: string, to: string, amount: number): SettledTransfer[] => {
   if (isSettled(settled, from, to, amount)) return settled;
   const next = [...settled, { from, to, amount, settledAt: new Date().toISOString() }];
   save(next);

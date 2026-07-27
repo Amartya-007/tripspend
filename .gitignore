@@ -57,7 +57,7 @@ ios/App/App/public/
 /rule.md
 
 # AI assistant config files (Cursor, Claude, Windsurf, OpenCode, etc.)
-.kiro
+kiro
 .vscode
 .cursorrules
 .windsurfrules

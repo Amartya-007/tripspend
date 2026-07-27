@@ -94,7 +94,7 @@ const cloneTripData = (data: TripData): TripData => ({
   expenses: data.expenses.map((expense) => ({ ...expense })),
 });
 
-export const syncTripIncremental = async (uid: string, localTrip: Trip): Promise<SyncTripResult> => {
+const syncTripIncremental = async (uid: string, localTrip: Trip): Promise<SyncTripResult> => {
   const attemptAt = Date.now();
   const db = requireFirestore();
   const tripRef = tripDocRef(uid, localTrip.id);
@@ -381,7 +381,7 @@ export const loadAllTripsFromCloud = async (uid: string): Promise<Trip[]> => {
 /**
  * Load a single trip by ID (backward compatible & new format)
  */
-export const loadTripFromCloud = async (uid: string, tripId?: string): Promise<TripData | null> => {
+const loadTripFromCloud = async (uid: string, tripId?: string): Promise<TripData | null> => {
   const targetTripId = tripId || ACTIVE_TRIP_DOC_ID;
   const ref = tripDocRef(uid, targetTripId);
   const snap = await getDoc(ref);
@@ -411,7 +411,7 @@ export const loadTripFromCloud = async (uid: string, tripId?: string): Promise<T
 /**
  * Delete a trip from the cloud
  */
-export const deleteTripFromCloud = async (uid: string, tripId: string): Promise<void> => {
+const deleteTripFromCloud = async (uid: string, tripId: string): Promise<void> => {
   const db = requireFirestore();
   const ref = tripDocRef(uid, tripId);
 

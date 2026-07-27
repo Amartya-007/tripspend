@@ -22,7 +22,7 @@ export const MAX_SETTLEMENT_NOTE_LENGTH = 150;
 export const MAX_JOIN_TRIP_ID_LENGTH = 6;
 
 // Counter thresholds — show counter when usage >= this fraction of max
-export const COUNTER_THRESHOLD = 0.8;
+const COUNTER_THRESHOLD = 0.8;
 
 // Default categories
 export const DEFAULT_CATEGORIES = ['Food', 'Travel', 'Stay', 'Misc'] as const;

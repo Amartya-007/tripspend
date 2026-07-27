@@ -12,7 +12,7 @@ export const createMemberId = () => {
   return `member_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 };
 
-export const normalizeMemberName = (value: string) => value.trim();
+const normalizeMemberName = (value: string) => value.trim();
 
 export const isValidMemberName = (value: string) => {
   const trimmed = normalizeMemberName(value);
@@ -213,7 +213,7 @@ export const buildSettlementWritePayload = ({
   updatedAt: nowIso,
 });
 
-export const sortMembersByJoinOrder = (registry: MemberRegistry, includeInactive = false) => {
+const sortMembersByJoinOrder = (registry: MemberRegistry, includeInactive = false) => {
   return Object.values(registry)
     .filter((member) => includeInactive || member.isActive)
     .sort((left, right) => {

@@ -22,7 +22,7 @@ const hasFirebaseConfig = [
   firebaseConfig.appId,
 ].every(Boolean);
 
-export const firebaseApp = hasFirebaseConfig
+const firebaseApp = hasFirebaseConfig
   ? (getApps().length ? getApp() : initializeApp(firebaseConfig))
   : null;
 
@@ -37,7 +37,7 @@ export const firestore = (() => {
     return getFirestore(firebaseApp);
   }
 })();
-export const storage = firebaseApp ? getStorage(firebaseApp) : null;
+const storage = firebaseApp ? getStorage(firebaseApp) : null;
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

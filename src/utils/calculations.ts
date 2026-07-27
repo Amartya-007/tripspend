@@ -107,7 +107,7 @@ const getRegistryMembers = (setup: TripSetup | null, includeInactive = false): M
     });
 };
 
-export const getTripMemberIds = (setup: TripSetup | null, includeInactive = false): string[] => {
+const getTripMemberIds = (setup: TripSetup | null, includeInactive = false): string[] => {
   if (!setup) return [];
   if (setup.memberRegistry) {
     return getRegistryMembers(setup, includeInactive).map((member) => member.memberId);
@@ -121,7 +121,7 @@ export const getTripMemberIds = (setup: TripSetup | null, includeInactive = fals
   return [];
 };
 
-export const getDefaultCategories = (): string[] => ['Food', 'Travel', 'Stay', 'Misc'];
+const getDefaultCategories = (): string[] => ['Food', 'Travel', 'Stay', 'Misc'];
 
 export const getTripPeople = (setup: TripSetup | null): string[] => {
   if (!setup) return [];

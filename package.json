@@ -16,7 +16,7 @@
     "@capacitor-community/contacts": "^7.1.0",
     "@capacitor-community/speech-recognition": "^7.0.1",
     "@capacitor-firebase/authentication": "^8.2.0",
-    "@capacitor/android": "^8.3.0",
+    "vite": "^6.2.0",
     "@capacitor/app": "^8.1.0",
     "@capacitor/camera": "^8.0.2",
     "@capacitor/cli": "^8.3.0",
@@ -32,8 +32,8 @@
     "capacitor-native-settings": "^8.1.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
+    "tesseract.js": "^7.0.0",
+    "tailwind-merge": "^3.5.0",
     "firebase": "^12.11.0",
     "jspdf": "^3.0.2",
     "lucide-react": "^0.546.0",
@@ -41,10 +41,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.13.2",
-    "tailwind-merge": "^3.5.0",
-    "tesseract.js": "^7.0.0",
-    "vite": "^6.2.0"
+    "react-router-dom": "^7.13.2"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",
@@ -52,10 +49,9 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.21",
+    "vite": "^6.2.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~5.8.2"
   }
 }
