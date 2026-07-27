@@ -1,4 +1,4 @@
-rules_version = '2';
+ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -44,18 +44,51 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).changedKeys().hasOnly(['members', 'updatedAt']);
     }
 
+    function identityMapForwardUnique() {
+      return !(request.resource.data.diff(resource.data).changedKeys().hasAny(['identityMap']))
+        || !(resource.data.identityMap is map && uid() in resource.data.identityMap)
+        || request.resource.data.identityMap[uid()] == resource.data.identityMap[uid()];
+    }
+
     // ── Shared collaborative trips ──────────────────────────────────────────
     match /trips/{tripId} {
-      allow read:   if isMemberFromResource();
-      allow create: if isMemberFromRequest();
-      allow update: if isMemberFromResource() || onlyJoinSelf();
+      // allow get: if signedIn(); allows anyone logged in to "check" a trip ID for joining.
+      // allow list: if signedIn(); allows querying. The where() clause filters to only trips the user is in.
+      allow get:    if signedIn();
+      allow list:   if signedIn();
+
+      allow create: if isMemberFromRequest() && request.resource.data.createdBy == uid();
+      // Member update: existing members can update, with identity-map forward-only guard.
+      // Join operation: non-members can only append themselves via onlyJoinSelf(),
+      // without the identityMap guard (identityMap may not exist yet on first join).
+      allow update: if (isMemberFromResource() && identityMapForwardUnique())
+                    || onlyJoinSelf();
 
       // Only the trip creator can delete.
       allow delete: if signedIn() && resource.data.createdBy == uid();
 
       // ── Expenses subcollection ──────────────────────────────────────────
       match /expenses/{expenseId} {
-        allow read, write: if isMemberFromResource();
+        function getPayerId(data) {
+          return data.get('payerId', data.get('paidBy', null));
+        }
+        
+        function isValidPayer(data) {
+          let payerId = getPayerId(data);
+          let tripData = get(/databases/$(database)/documents/trips/$(tripId)).data;
+          return payerId != null && (
+            (tripData.memberRegistry is map && payerId in tripData.memberRegistry) ||
+            (tripData.participants is list && payerId in tripData.participants) ||
+            (!(tripData.memberRegistry is map) && !(tripData.participants is list))
+          );
+        }
+
+        allow read: if isTripMember(tripId);
+        allow create: if isTripMember(tripId) && isValidPayer(request.resource.data);
+        allow update: if isTripMember(tripId) 
+                      && (!request.resource.data.diff(resource.data).changedKeys().hasAny(['payerId', 'paidBy']) 
+                          || isValidPayer(request.resource.data));
+        allow delete: if isTripMember(tripId);
       }
 
       // ── Settlements subcollection ───────────────────────────────────────
@@ -71,8 +104,11 @@ service cloud.firestore {
         allow create: if isTripMember(tripId)
           && request.resource.data.fromUserId == uid()
           && request.resource.data.toUserId   == null
-          && request.resource.data.status     == 'pending'
-          && request.resource.data.get('creatorOverride', false) == false;
+          && (request.resource.data.status == 'pending' || request.resource.data.status == 'paid')
+          && (
+            request.resource.data.get('creatorOverride', false) == false
+            || (isTripCreator(tripId) && request.resource.data.creatorOverride == true)
+          );
 
         // ── UPDATE ─────────────────────────────────────────────────────────
         // Immutable core fields — never change after creation.
@@ -85,112 +121,122 @@ service cloud.firestore {
           && request.resource.data.to     == resource.data.to
           && request.resource.data.amount == resource.data.amount
 
-          // ── Active-flag protection ────────────────────────────────────────
-          // fromMemberActive and toMemberActive may only change when status
-          // is also changing. If status is unchanged, flags must stay the same.
-          && (
-            request.resource.data.status != resource.data.status
-            || (
-              request.resource.data.get('fromMemberActive', true) == resource.data.get('fromMemberActive', true)
-              && request.resource.data.get('toMemberActive', true)   == resource.data.get('toMemberActive', true)
-            )
-          )
-
           && (
 
-            // ── Path 1: Sender — pending → paid ──────────────────────────
-            // Sender marks payment sent. toUserId must still be null
-            // (receiver hasn't confirmed yet), preventing race conditions.
+            // ── Path 0: Creator flag-only update ─────────────────────────
+            // Trip creator propagates member isActive changes to settlement
+            // documents when a member is removed or restored.
+            // Status must be unchanged. Only fromMemberActive, toMemberActive,
+            // and updatedAt may differ. creatorOverride must stay false.
+            // This path cannot be used to change status or financial fields.
             (
-              resource.data.status     == 'pending'
-              && request.resource.data.status == 'paid'
-              && resource.data.fromUserId      == uid()
-              && request.resource.data.fromUserId == uid()
-              && resource.data.toUserId        == null
-              && request.resource.data.toUserId == null
+              isTripCreator(tripId)
+              && request.resource.data.status       == resource.data.status
+              && request.resource.data.fromUserId   == resource.data.fromUserId
+              && request.resource.data.toUserId     == resource.data.toUserId
               && request.resource.data.get('creatorOverride', false) == false
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['fromMemberActive', 'toMemberActive', 'updatedAt'])
             )
 
             ||
 
-            // ── Path 2: Sender retract — paid → pending ───────────────────
-            // Sender can retract ONLY before receiver has confirmed
-            // (toUserId still null). Cannot retract after receiver acts.
+            // ── Transition paths (Paths 1–7) ──────────────────────────────
+            // For all transition writes: active flags may only change when
+            // status is also changing. If status is unchanged, flags must stay.
             (
-              resource.data.status     == 'paid'
-              && request.resource.data.status == 'pending'
-              && resource.data.fromUserId      == uid()
-              && request.resource.data.fromUserId == uid()
-              && resource.data.toUserId        == null
-              && request.resource.data.toUserId == null
-              && request.resource.data.get('creatorOverride', false) == false
-            )
+              (
+                request.resource.data.status != resource.data.status
+                || (
+                  request.resource.data.get('fromMemberActive', true) == resource.data.get('fromMemberActive', true)
+                  && request.resource.data.get('toMemberActive', true) == resource.data.get('toMemberActive', true)
+                )
+              )
 
-            ||
+              && (
 
-            // ── Path 3: Receiver first-time confirm — paid → completed ────
-            // Receiver sets their uid and moves to completed.
-            // This is the first time toUserId is written (was null on create).
-            (
-              resource.data.status     == 'paid'
-              && request.resource.data.status == 'completed'
-              && resource.data.toUserId        == null
-              && request.resource.data.toUserId == uid()
-              && request.resource.data.fromUserId == resource.data.fromUserId
-              && isTripMember(tripId)
-              && request.resource.data.get('creatorOverride', false) == false
-            )
+                // ── Path 1: Sender — pending → paid ────────────────────────
+                (
+                  resource.data.status            == 'pending'
+                  && request.resource.data.status == 'paid'
+                  && resource.data.fromUserId      == uid()
+                  && request.resource.data.fromUserId == uid()
+                  && resource.data.toUserId        == null
+                  && request.resource.data.toUserId == null
+                  && request.resource.data.get('creatorOverride', false) == false
+                )
 
-            ||
+                ||
 
-            // ── Path 4: Receiver reopen — completed → pending ─────────────
-            // Receiver can reopen a completed settlement.
-            (
-              resource.data.status     == 'completed'
-              && request.resource.data.status == 'pending'
-              && resource.data.toUserId        == uid()
-              && request.resource.data.fromUserId == resource.data.fromUserId
-              && request.resource.data.get('creatorOverride', false) == false
-            )
+                // ── Path 2: Sender retract — paid → pending ─────────────────
+                (
+                  resource.data.status            == 'paid'
+                  && request.resource.data.status == 'pending'
+                  && resource.data.fromUserId      == uid()
+                  && request.resource.data.fromUserId == uid()
+                  && resource.data.toUserId        == null
+                  && request.resource.data.toUserId == null
+                  && request.resource.data.get('creatorOverride', false) == false
+                )
 
-            ||
+                ||
 
-            // ── Path 5: Creator fallback — pending → paid ─────────────────
-            // Trip creator acts on behalf of an inactive sender.
-            // fromMemberActive must be false (denormalized on the doc).
-            // creatorOverride must be set to true by this write.
-            (
-              resource.data.status     == 'pending'
-              && request.resource.data.status == 'paid'
-              && isTripCreator(tripId)
-              && resource.data.get('fromMemberActive', true) == false
-              && request.resource.data.creatorOverride == true
-            )
+                // ── Path 3: Receiver first-time confirm — paid → completed ──
+                (
+                  resource.data.status            == 'paid'
+                  && request.resource.data.status == 'completed'
+                  && resource.data.toUserId        == null
+                  && request.resource.data.toUserId == uid()
+                  && request.resource.data.fromUserId == resource.data.fromUserId
+                  && isTripMember(tripId)
+                  && request.resource.data.get('creatorOverride', false) == false
+                )
 
-            ||
+                ||
 
-            // ── Path 6: Creator fallback — paid → completed ───────────────
-            // Trip creator confirms receipt on behalf of an inactive receiver.
-            // toMemberActive must be false (denormalized on the doc).
-            // creatorOverride must be set to true by this write.
-            (
-              resource.data.status     == 'paid'
-              && request.resource.data.status == 'completed'
-              && isTripCreator(tripId)
-              && resource.data.get('toMemberActive', true) == false
-              && request.resource.data.creatorOverride == true
-            )
+                // ── Path 4: Receiver reopen — completed → pending ───────────
+                (
+                  resource.data.status            == 'completed'
+                  && request.resource.data.status == 'pending'
+                  && resource.data.toUserId        == uid()
+                  && request.resource.data.fromUserId == resource.data.fromUserId
+                  && request.resource.data.get('creatorOverride', false) == false
+                )
 
-            ||
+                ||
 
-            // ── Path 7: Creator fallback — completed → pending (reopen) ───
-            // Trip creator reopens on behalf of an inactive receiver.
-            (
-              resource.data.status     == 'completed'
-              && request.resource.data.status == 'pending'
-              && isTripCreator(tripId)
-              && resource.data.get('toMemberActive', true) == false
-              && request.resource.data.creatorOverride == true
+                // ── Path 5: Creator fallback — pending → paid ───────────────
+                (
+                  resource.data.status            == 'pending'
+                  && request.resource.data.status == 'paid'
+                  && isTripCreator(tripId)
+                  && resource.data.get('fromMemberActive', true) == false
+                  && request.resource.data.creatorOverride == true
+                )
+
+                ||
+
+                // ── Path 6: Creator fallback — paid → completed ─────────────
+                (
+                  resource.data.status            == 'paid'
+                  && request.resource.data.status == 'completed'
+                  && isTripCreator(tripId)
+                  && resource.data.get('toMemberActive', true) == false
+                  && request.resource.data.creatorOverride == true
+                )
+
+                ||
+
+                // ── Path 7: Creator fallback — completed → pending ──────────
+                (
+                  resource.data.status            == 'completed'
+                  && request.resource.data.status == 'pending'
+                  && isTripCreator(tripId)
+                  && resource.data.get('toMemberActive', true) == false
+                  && request.resource.data.creatorOverride == true
+                )
+
+              )
             )
 
           );

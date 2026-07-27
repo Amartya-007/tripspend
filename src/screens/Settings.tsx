@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RotateCcw, Edit3, ChevronRight, Download, Upload, Share2, FileText, History, CloudUpload, CloudDownload, LogIn, LogOut, Bell, HandCoins } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -8,6 +8,7 @@ import { Directory, Filesystem } from '@capacitor/filesystem';
 import { NotificationPayload } from '../components/NotificationCard';
 import { Expense, TripData, TripSetup, Trip, calculateSettlement, getTripPeople } from '../utils/calculations.ts';
 import { TripSwitcher } from '../components/TripSwitcher';
+import { AccountSwitchDialog } from '../components/AccountSwitchDialog';
 import { formatCurrency } from '../utils/cn';
 
 interface SettingsProps {
@@ -25,6 +26,7 @@ interface SettingsProps {
   userEmail: string | null;
   onSignInGoogle: () => void;
   onSignOutGoogle: () => void;
+  onSwitchAccount?: () => void;
   onCloudBackup: () => void;
   onCloudRestore: () => void;
   notificationsEnabled: boolean;
@@ -39,7 +41,8 @@ interface SettingsProps {
   // Multi-trip props
   trips?: Trip[];
   activeTrip?: string | null;
-  onCreateTrip?: (name: string) => void;
+  onCreateTrip?: (name: string) => string | null | void | Promise<string | null | void>;
+  onGenerateInviteCode?: () => Promise<string | null>;
   onJoinTrip?: (tripId: string) => Promise<boolean>;
   onSelectTrip?: (tripId: string) => void;
   onDeleteTrip?: (tripId: string) => void;
@@ -73,6 +76,7 @@ export const Settings: React.FC<SettingsProps> = ({
   userEmail,
   onSignInGoogle,
   onSignOutGoogle,
+  onSwitchAccount,
   onCloudBackup,
   onCloudRestore,
   notificationsEnabled,
@@ -87,6 +91,7 @@ export const Settings: React.FC<SettingsProps> = ({
   trips = [],
   activeTrip = null,
   onCreateTrip,
+  onGenerateInviteCode,
   onJoinTrip,
   onSelectTrip,
   onDeleteTrip,
@@ -94,6 +99,8 @@ export const Settings: React.FC<SettingsProps> = ({
 }) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
 
   const totalBudget = useMemo(() => data.setup?.totalBudget ?? 0, [data.setup]);
   const totalSpent = useMemo(() => data.expenses.reduce((s, e) => s + e.amount, 0), [data.expenses]);
@@ -134,6 +141,56 @@ export const Settings: React.FC<SettingsProps> = ({
     }
     alert(payload.message ? `${payload.title}\n${payload.message}` : payload.title);
   }, [notify]);
+
+  const handleAuthClick = useCallback(() => {
+    if (userEmail) {
+      // User is already logged in, show account management dialog
+      setAccountDialogOpen(true);
+    } else {
+      // Not logged in, sign in
+      onSignInGoogle();
+    }
+  }, [userEmail, onSignInGoogle]);
+
+  const handleSwitchAccount = useCallback(async () => {
+    setSwitchingAccount(true);
+    try {
+      // First sign out, then sign in with a different account
+      await onSignOutGoogle();
+      // Small delay to ensure sign-out completes
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // Then trigger sign in
+      if (onSwitchAccount) {
+        await onSwitchAccount();
+      } else {
+        await onSignInGoogle();
+      }
+    } catch (error) {
+      console.error('Account switch failed', error);
+      pushNotice({ 
+        title: 'Account Switch Failed', 
+        message: 'Could not switch accounts. Please try again.', 
+        variant: 'error' 
+      });
+    } finally {
+      setSwitchingAccount(false);
+      setAccountDialogOpen(false);
+    }
+  }, [onSignOutGoogle, onSwitchAccount, onSignInGoogle, pushNotice]);
+
+  const handleSignOutFromDialog = useCallback(async () => {
+    try {
+      await onSignOutGoogle();
+      setAccountDialogOpen(false);
+    } catch (error) {
+      console.error('Sign-out failed', error);
+      pushNotice({ 
+        title: 'Sign-Out Failed', 
+        message: 'Could not sign out. Please try again.', 
+        variant: 'error' 
+      });
+    }
+  }, [onSignOutGoogle, pushNotice]);
 
   const handleReset = useCallback(() => {
     if (window.confirm('Reset the trip? This will delete all expenses and setup data.')) {
@@ -428,6 +485,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 navigate('/');
               }}
               onCreateTrip={(name) => onCreateTrip?.(name)}
+              onGenerateInviteCode={onGenerateInviteCode}
               onJoinTrip={(tripId) => onJoinTrip?.(tripId) ?? Promise.resolve(false)}
               onDeleteTrip={(tripId) => onDeleteTrip?.(tripId)}
               onRenameTrip={(tripId, name) => onRenameTrip?.(tripId, name)}
@@ -567,7 +625,7 @@ export const Settings: React.FC<SettingsProps> = ({
               iconBg={userEmail ? 'bg-slate-100' : 'bg-blue-50'}
               label={authLoading ? 'Checking sign-in...' : userEmail ? 'Signed in with Google' : 'Sign in with Google'}
               description={authLoading ? 'Please wait' : userEmail || 'Required for cloud backup and restore'}
-              onClick={userEmail ? onSignOutGoogle : onSignInGoogle}
+              onClick={handleAuthClick}
             />
             <Divider />
             <SettingItem
@@ -602,6 +660,16 @@ export const Settings: React.FC<SettingsProps> = ({
         <p className="text-xs text-slate-400">Made by Amartya Vishwakarma</p>
         <p className="text-xs text-slate-300 font-bold uppercase tracking-widest pt-2">v2.0.0</p>
       </div>
+
+      {/* Account Switch Dialog */}
+      <AccountSwitchDialog
+        isOpen={accountDialogOpen}
+        userEmail={userEmail}
+        isLoading={switchingAccount}
+        onSwitchAccount={handleSwitchAccount}
+        onSignOut={handleSignOutFromDialog}
+        onClose={() => setAccountDialogOpen(false)}
+      />
     </div>
   );
 };

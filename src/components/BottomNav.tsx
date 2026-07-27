@@ -11,16 +11,25 @@ const NAV_ITEMS = [
   { to: '/settings', label: 'Settings', Icon: Settings },
 ] as const;
 
+// On Android WebViews, tapping a fixed-position element while a form input has
+// focus only dismisses the software keyboard (the tap doesn't reach the element).
+// Blurring the active element first collapses the keyboard AND lets the tap register.
+const dismissKeyboard = () => (document.activeElement as HTMLElement | null)?.blur();
+
 export const BottomNav: React.FC = () => {
   const navigate = useNavigate();
   const handleAddExpense = useCallback(() => {
+    dismissKeyboard();
     navigate('/add');
   }, [navigate]);
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 z-50 shadow-xl shadow-slate-200/20"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 z-40 shadow-xl shadow-slate-200/20"
+      style={{ 
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        pointerEvents: 'auto',
+      }}
     >
       <div className="max-w-md mx-auto flex items-center justify-around px-2 h-16">
         <NavItem to={NAV_ITEMS[0].to} Icon={NAV_ITEMS[0].Icon} label={NAV_ITEMS[0].label} />
@@ -46,6 +55,7 @@ export const BottomNav: React.FC = () => {
 const NavItem = React.memo(({ to, Icon, label }: { to: string; Icon: React.ComponentType<{ className?: string }>; label: string }) => (
   <NavLink
     to={to}
+    onClick={dismissKeyboard}
     className={({ isActive }) =>
       cn(
         'flex flex-col items-center justify-center gap-1 transition-all duration-300 relative rounded-xl py-2 px-3',

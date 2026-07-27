@@ -1,11 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { TripData, getTripCategories, getTripPeople, calculateStats, calculateSettlement } from '../utils/calculations.ts';
+import { TripData, getTripCategories, calculateStats, calculateSettlement, MemberRecord } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 import { motion } from 'motion/react';
 import { AlertTriangle ,TrendingUp} from 'lucide-react';
 import { differenceInDays, parseISO } from 'date-fns';
 import { loadSettledTransfers, pruneStale } from '../utils/settlements.ts';
+import { buildDisplayNameMap } from '../utils/memberDisplay';
 
 const dateFmt = new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' });
 
@@ -21,11 +22,28 @@ const CAT_DOT: Record<string, string> = {
 
 const transferKey = (from: string, to: string, amount: number) => `${from}->${to}:${Math.round(amount * 100)}`;
 
-interface Props { data: TripData; }
+interface Props {
+  data: TripData;
+  activeMembers?: MemberRecord[];
+  displayNames?: Record<string, string>;
+  isCollaborative?: boolean;
+}
 
-export const Analytics: React.FC<Props> = ({ data }) => {
+export const Analytics: React.FC<Props> = ({ data, activeMembers = [], displayNames: propDisplayNames = {} }) => {
+  const [showAllOwedPeople, setShowAllOwedPeople] = useState(false);
+  const [expandedOwedPeople, setExpandedOwedPeople] = useState<Record<string, boolean>>({});
   const stats = useMemo(() => calculateStats(data), [data]);
-  const people = useMemo(() => getTripPeople(data.setup), [data.setup]);
+  const registry = data.setup?.memberRegistry ?? {};
+  const displayNames = useMemo(() => {
+    if (Object.keys(propDisplayNames).length > 0) return propDisplayNames;
+    if (Object.keys(registry).length > 0) return buildDisplayNameMap(registry);
+    return {};
+  }, [propDisplayNames, registry]);
+  const people = useMemo(() => {
+    if (activeMembers.length > 0) return activeMembers.map((member) => member.memberId);
+    if (Object.keys(registry).length > 0) return Object.keys(registry);
+    return [];
+  }, [activeMembers, registry]);
   const settlement = useMemo(() => calculateSettlement(data.setup, data.expenses), [data.setup, data.expenses]);
 
   // Read settled transfers using structured storage, prune stale entries
@@ -60,9 +78,105 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       for (const p of pts) { if (p in share) share[p] += s; }
     }
     return people
-      .map(p => ({ name: p, paid: paid[p], share: share[p], net: settlement.balances[p] ?? 0 }))
+      .map(p => ({ memberId: p, name: displayNames[p] || p, paid: paid[p], share: share[p], net: settlement.balances[p] ?? 0 }))
       .sort((a, b) => b.paid - a.paid);
-  }, [people, data.expenses, settlement.balances]);
+  }, [people, data.expenses, settlement.balances, displayNames]);
+
+  const personOwesLedger = useMemo(() => {
+    if (!people.length) return [] as Array<{
+      memberId: string;
+      name: string;
+      totalOwes: number;
+      items: Array<{
+        expenseId: string;
+        label: string;
+        date: string;
+        owedTo: string;
+        amount: number;
+      }>;
+    }>;
+
+    const ledgerMap = new Map<string, {
+      memberId: string;
+      name: string;
+      totalOwes: number;
+      items: Array<{
+        expenseId: string;
+        label: string;
+        date: string;
+        owedTo: string;
+        amount: number;
+      }>;
+    }>();
+
+    for (let i = 0; i < people.length; i += 1) {
+      const person = people[i];
+      ledgerMap.set(person, {
+        memberId: person,
+        name: displayNames[person] || person,
+        totalOwes: 0,
+        items: [],
+      });
+    }
+
+    for (let i = 0; i < data.expenses.length; i += 1) {
+      const exp = data.expenses[i];
+      const participants = exp.participants?.length ? exp.participants : people;
+      if (!participants.length || !exp.paidBy) continue;
+
+      const shareMap: Record<string, number> = {};
+      if (exp.splitType === 'custom' && exp.splitMap) {
+        for (let j = 0; j < participants.length; j += 1) {
+          const p = participants[j];
+          shareMap[p] = Number(exp.splitMap[p] || 0);
+        }
+      } else {
+        const equalShare = exp.amount / participants.length;
+        for (let j = 0; j < participants.length; j += 1) {
+          shareMap[participants[j]] = equalShare;
+        }
+      }
+
+      for (let j = 0; j < participants.length; j += 1) {
+        const person = participants[j];
+        if (person === exp.paidBy) continue;
+        const owed = Number(shareMap[person] || 0);
+        if (owed <= 0) continue;
+
+        const row = ledgerMap.get(person);
+        if (!row) continue;
+
+        row.totalOwes += owed;
+        row.items.push({
+          expenseId: exp.id,
+          label: exp.note?.trim() || exp.category,
+          date: exp.date,
+          owedTo: displayNames[exp.paidBy] || exp.paidBy,
+          amount: owed,
+        });
+      }
+    }
+
+    return Array.from(ledgerMap.values())
+      .filter((row) => row.totalOwes > 0)
+      .map((row) => ({
+        ...row,
+        items: row.items.sort((a, b) => b.date.localeCompare(a.date)),
+      }))
+      .sort((a, b) => b.totalOwes - a.totalOwes);
+  }, [people, data.expenses, displayNames]);
+
+  const owedVisiblePeople = useMemo(() => {
+    if (showAllOwedPeople) return personOwesLedger;
+    return personOwesLedger.slice(0, 3);
+  }, [personOwesLedger, showAllOwedPeople]);
+
+  const toggleExpandOwedPerson = (memberId: string) => {
+    setExpandedOwedPeople((prev) => ({
+      ...prev,
+      [memberId]: !prev[memberId],
+    }));
+  };
 
   const categoryBreakdown = useMemo(() => {
     const cats = getTripCategories(data.setup);
@@ -243,7 +357,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
             )}
           </div>
           {personStats.map((p, idx) => (
-            <React.Fragment key={p.name}>
+            <React.Fragment key={p.memberId}>
               {idx > 0 && <div className="h-px bg-slate-50 mx-5" />}
               <div className="flex items-center gap-3 px-5 py-3">
                 <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-sm font-black text-blue-700 flex-shrink-0">
@@ -262,6 +376,79 @@ export const Analytics: React.FC<Props> = ({ data }) => {
               </div>
             </React.Fragment>
           ))}
+        </motion.div>
+      )}
+
+      {/* Full Analytics: Per-person owed cuts ledger */}
+      {personOwesLedger.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden"
+        >
+          <div className="px-5 pt-5 pb-3">
+            <p className="font-bold text-slate-900">Per Person Owed Cuts</p>
+            <p className="text-xs text-slate-400 mt-1">Shows each person's expense shares they owe (not what they paid)</p>
+          </div>
+
+          {owedVisiblePeople.map((person, idx) => (
+            <React.Fragment key={person.memberId}>
+              {idx > 0 && <div className="h-px bg-slate-50 mx-5" />}
+              <div className="px-5 py-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">{person.name}</p>
+                    <p className="text-[10px] text-slate-400">{person.items.length} owed cut{person.items.length === 1 ? '' : 's'}</p>
+                  </div>
+                  <p className={`text-sm font-black ${person.totalOwes > 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                    {person.totalOwes > 0 ? `-${formatCurrency(person.totalOwes)}` : 'Even'}
+                  </p>
+                </div>
+
+                {person.items.length > 0 ? (
+                  <div className="space-y-2">
+                    {(expandedOwedPeople[person.memberId] ? person.items : person.items.slice(0, 2)).map((item) => (
+                      <div key={`${person.memberId}-${item.expenseId}`} className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 truncate">{item.label}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{dateFmt.format(new Date(item.date + 'T00:00:00'))} · owes to {item.owedTo}</p>
+                        </div>
+                        <p className="text-xs font-black text-red-500 flex-shrink-0">-{formatCurrency(item.amount)}</p>
+                      </div>
+                    ))}
+                    {person.items.length > 2 && (
+                      <button
+                        onClick={() => toggleExpandOwedPerson(person.memberId)}
+                        className="w-full text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded-xl py-2"
+                      >
+                        {expandedOwedPeople[person.memberId]
+                          ? 'Show less'
+                          : `Show ${person.items.length - 2} more cut${person.items.length - 2 === 1 ? '' : 's'}`}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    No owed cuts for this person.
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
+          ))}
+
+          {personOwesLedger.length > 3 && (
+            <div className="px-5 pb-4">
+              <button
+                onClick={() => setShowAllOwedPeople((prev) => !prev)}
+                className="w-full text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded-xl py-2"
+              >
+                {showAllOwedPeople
+                  ? 'Show fewer people'
+                  : `Show ${personOwesLedger.length - 3} more people`}
+              </button>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -357,7 +544,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{exp.note || exp.category}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{exp.category} · {exp.paidBy}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{exp.category} · {displayNames[exp.paidBy] || exp.paidBy}</p>
                 </div>
                 <p className="text-sm font-black text-slate-900 flex-shrink-0">{formatCurrency(exp.amount)}</p>
               </div>
@@ -382,7 +569,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
       )}
 
       {/* Trip Health Score */}
-      {healthScore !== null && healthStyle && (
+      {/* {healthScore !== null && healthStyle && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
           className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
@@ -406,7 +593,7 @@ export const Analytics: React.FC<Props> = ({ data }) => {
           </div>
           <p className="text-xs text-slate-400 mt-2">Based on budget usage, settlement balance & spending consistency</p>
         </motion.div>
-      )}
+      )} */}
     </div>
   );
 };

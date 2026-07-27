@@ -11,6 +11,9 @@ export interface SettledTransfer {
   note?: string;
   proofImage?: string;
   proofName?: string;
+  creatorOverride?: boolean;
+  fromMemberActive?: boolean;
+  toMemberActive?: boolean;
 }
 
 const STORAGE_KEY = 'tripspend_settled_v2';

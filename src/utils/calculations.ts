@@ -1,5 +1,21 @@
 import { differenceInDays, isToday, isYesterday, parseISO, startOfDay } from 'date-fns';
 
+/**
+ * Stable identity record for a trip participant.
+ * `memberId` is a UUID assigned once at creation and never changes.
+ */
+export interface MemberRecord {
+  memberId: string;    // UUID, immutable, generated once at creation
+  name: string;        // mutable display name, 1–50 chars after trim
+  isActive: boolean;   // false = soft-deleted
+  joinedAt: string;    // ISO timestamp, set at creation, immutable
+  leftAt?: string;     // ISO timestamp, set on soft-delete, cleared on restore
+  color?: string;      // optional hex or Tailwind token for avatar badge
+}
+
+/** Authoritative map of memberId → MemberRecord for a trip. */
+export type MemberRegistry = Record<string, MemberRecord>; // keyed by memberId
+
 export interface TripSetup {
   peopleCount: number;
   budgetPerPerson: number;
@@ -7,7 +23,10 @@ export interface TripSetup {
   startDate: string;
   endDate: string;
   lockPreviousDays: boolean;
+  /** @deprecated Legacy name-string list. Kept for migration detection; removed after migration completes. */
   participants?: string[];
+  /** Stable UUID-keyed member map. Replaces `participants[]` after migration. */
+  memberRegistry?: MemberRegistry;
   participantPhoneNumbers?: Record<string, string>;
   participantUpiIds?: Record<string, string>;
   customCategories?: string[];
@@ -19,7 +38,9 @@ export interface Expense {
   category: string;
   note?: string;
   date: string;
+  /** memberId of the payer. Stores a name string in legacy trips; stores memberId after migration. */
   paidBy: string;
+  /** memberIds of participants in this expense. Stores name strings in legacy trips; stores memberIds after migration. */
   participants?: string[];
   splitType?: 'equal' | 'custom';
   splitMap?: Record<string, number>;
@@ -56,7 +77,9 @@ export interface TripsContainer {
 }
 
 export interface SettlementTransfer {
+  /** memberId of the payer. Stores a name string in legacy trips; stores memberId after migration. */
   from: string;
+  /** memberId of the receiver. Stores a name string in legacy trips; stores memberId after migration. */
   to: string;
   amount: number;
 }
@@ -67,10 +90,45 @@ export interface SettlementSummary {
   totalToSettle: number;
 }
 
+const toIsoTime = (value: string | undefined) => {
+  const parsed = value ? Date.parse(value) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getRegistryMembers = (setup: TripSetup | null, includeInactive = false): MemberRecord[] => {
+  if (!setup?.memberRegistry) return [];
+  return Object.values(setup.memberRegistry)
+    .filter((member) => includeInactive || member.isActive)
+    .sort((left, right) => {
+      const leftTime = toIsoTime(left.joinedAt);
+      const rightTime = toIsoTime(right.joinedAt);
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return left.memberId.localeCompare(right.memberId);
+    });
+};
+
+export const getTripMemberIds = (setup: TripSetup | null, includeInactive = false): string[] => {
+  if (!setup) return [];
+  if (setup.memberRegistry) {
+    return getRegistryMembers(setup, includeInactive).map((member) => member.memberId);
+  }
+  if (Array.isArray(setup.participants) && setup.participants.length > 0) {
+    return setup.participants;
+  }
+  if (setup.peopleCount > 0) {
+    return Array.from({ length: setup.peopleCount }, (_, i) => `Person ${i + 1}`);
+  }
+  return [];
+};
+
 export const getDefaultCategories = (): string[] => ['Food', 'Travel', 'Stay', 'Misc'];
 
 export const getTripPeople = (setup: TripSetup | null): string[] => {
   if (!setup) return [];
+
+  if (setup.memberRegistry) {
+    return getRegistryMembers(setup).map((member) => member.name);
+  }
 
   if (Array.isArray(setup.participants) && setup.participants.length > 0) {
     return setup.participants;
@@ -142,8 +200,24 @@ export const calculateSettlement = (
     return { balances: {}, transfers: [], totalToSettle: 0 };
   }
 
-  const people = getTripPeople(setup);
+  const people = setup.memberRegistry
+    ? getTripMemberIds(setup, true)
+    : getTripPeople(setup);
   const balances: Record<string, number> = {};
+  const legacyNameToId = setup.memberRegistry
+    ? Object.values(setup.memberRegistry).reduce<Record<string, string>>((acc, member) => {
+        acc[member.name] = member.memberId;
+        return acc;
+      }, {})
+    : null;
+  const resolvePerson = (value: string | undefined): string | null => {
+    if (!value) return null;
+    if (balances[value] !== undefined) return value;
+    if (legacyNameToId && legacyNameToId[value] && balances[legacyNameToId[value]] !== undefined) {
+      return legacyNameToId[value];
+    }
+    return null;
+  };
 
   for (let i = 0; i < people.length; i++) {
     balances[people[i]] = 0;
@@ -152,8 +226,8 @@ export const calculateSettlement = (
   for (let i = 0; i < expenses.length; i++) {
     const expense = expenses[i];
 
-    const payer = expense.paidBy;
-    if (!payer || balances[payer] === undefined) continue;
+    const payer = resolvePerson(expense.paidBy);
+    if (!payer) continue;
 
     const participants =
       expense.participants && expense.participants.length > 0
@@ -165,8 +239,9 @@ export const calculateSettlement = (
     const shareMap = getShareMap(expense, participants);
 
     for (const person in shareMap) {
-      if (balances[person] !== undefined) {
-        balances[person] -= shareMap[person];
+      const resolvedParticipant = resolvePerson(person);
+      if (resolvedParticipant) {
+        balances[resolvedParticipant] -= shareMap[person];
       }
     }
   }

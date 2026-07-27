@@ -4,14 +4,19 @@ import { Expense, TripSetup } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
 import { Calendar, Tag, ArrowLeft, Pencil, Trash2, ReceiptText, AlertCircle, User, Users } from 'lucide-react';
 import { format, isBefore, parseISO, startOfDay } from 'date-fns';
+import { buildDisplayNameMap } from '../utils/memberDisplay';
 
 interface ExpenseDetailProps {
   expenses: Expense[];
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onUpdate?: (expense: Expense) => void | Promise<void>;
   setup: TripSetup | null;
+  isCollaborative?: boolean;
+  userUid?: string | null;
+  myMemberId?: string | null;
 }
 
-export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete, setup }) => {
+export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete, setup, isCollaborative, userUid, myMemberId }) => {
   const { id } = useParams();
   const navigate = useNavigate();
 
@@ -43,6 +48,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
   }, [expenseDate, setup?.lockPreviousDays]);
 
   const participants = useMemo(() => expense?.participants ?? [], [expense?.participants]);
+  const displayNames = useMemo(() => buildDisplayNameMap(setup?.memberRegistry ?? {}, true), [setup?.memberRegistry]);
   const tags = useMemo(() => expense?.tags ?? [], [expense?.tags]);
 
   const receipts = useMemo(() => {
@@ -53,7 +59,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
 
   const splitPerPerson = useMemo(() => {
     if (!expense || participants.length === 0) return null;
-    return `₹${(expense.amount / participants.length).toFixed(0)} each`;
+    return formatCurrency(expense.amount / participants.length);
   }, [expense, participants.length]);
 
   if (!expense) {
@@ -76,7 +82,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
     navigate(`/edit/${expense.id}`);
   }, [navigate, expense.id]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (isLocked) {
       alert('This expense is locked and cannot be deleted.');
       return;
@@ -85,7 +91,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
     const shouldDelete = window.confirm('Delete this expense?');
     if (!shouldDelete) return;
 
-    onDelete(expense.id);
+    await Promise.resolve(onDelete(expense.id));
     navigate('/expenses');
   }, [expense.id, isLocked, navigate, onDelete]);
 
@@ -133,7 +139,7 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
             <div className="w-7 h-7 bg-emerald-50 rounded-lg flex items-center justify-center border border-emerald-100">
               <User className="w-3.5 h-3.5 text-emerald-600" />
             </div>
-            <p className="text-sm font-semibold text-slate-700">{expense.paidBy || 'Trip Wallet'}</p>
+            <p className="text-sm font-semibold text-slate-700">{displayNames[expense.paidBy] || expense.paidBy || 'Trip Wallet'}</p>
           </div>
         </div>
 
@@ -156,14 +162,23 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
                   <span className="w-4 h-4 rounded-full bg-white border border-current flex items-center justify-center text-[9px] font-black flex-shrink-0">
                     {person[0].toUpperCase()}
                   </span>
-                  {person}
+                  {displayNames[person] || person}
                   {person === expense.paidBy && (
                     <span className="text-[9px] font-bold text-emerald-500 ml-0.5">paid</span>
                   )}
                 </span>
               ))}
             </div>
-            {splitPerPerson && <p className="text-[10px] text-slate-400 mt-2">{splitPerPerson}</p>}
+            {splitPerPerson && (
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Per person share</p>
+                <p className="mt-0.5 text-lg font-black text-amber-900">
+                  {splitPerPerson}
+                  <span className="ml-1 text-xs font-semibold text-amber-700">each</span>
+                </p>
+                <p className="text-[11px] text-amber-800/90">Each selected person will owe this amount.</p>
+              </div>
+            )}
           </div>
         )}
 

@@ -10,7 +10,8 @@ interface TripSwitcherProps {
   trips: Trip[];
   activeTrip: string | null;
   onSelectTrip: (tripId: string) => void;
-  onCreateTrip: (name: string) => void;
+  onCreateTrip: (name: string) => string | null | void | Promise<string | null | void>;
+  onGenerateInviteCode?: () => Promise<string | null>;
   onJoinTrip?: (tripId: string) => Promise<boolean>;
   onDeleteTrip: (tripId: string) => void;
   onRenameTrip: (tripId: string, newName: string) => void;
@@ -22,6 +23,7 @@ export function TripSwitcher({
   activeTrip,
   onSelectTrip,
   onCreateTrip,
+  onGenerateInviteCode,
   onJoinTrip,
   onDeleteTrip,
   onRenameTrip,
@@ -31,8 +33,11 @@ export function TripSwitcher({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [newTripName, setNewTripName] = useState('');
+  const [creatingTrip, setCreatingTrip] = useState(false);
   const [joinTripId, setJoinTripId] = useState('');
   const [joining, setJoining] = useState(false);
+  const [generatingInviteCode, setGeneratingInviteCode] = useState(false);
+  const [generatedInviteCode, setGeneratedInviteCode] = useState<string | null>(null);
   const [tab, setTab] = useState<'trips' | 'invite' | 'join'>('trips');
 
   const activeTripName = useMemo(
@@ -40,16 +45,22 @@ export function TripSwitcher({
     [activeTrip, trips]
   );
   const activeTripId = useMemo(() => activeTrip || null, [activeTrip]);
-
-  const inviteUrl = useMemo(() => {
-    if (!activeTripId) return '';
-    return `tripspend:///?joinTripId=${encodeURIComponent(activeTripId)}`;
-  }, [activeTripId]);
+  const effectiveInviteCode = useMemo(() => {
+    if (generatedInviteCode && /^\d{6}$/.test(generatedInviteCode)) return generatedInviteCode;
+    if (activeTripId && /^\d{6}$/.test(activeTripId)) return activeTripId;
+    return null;
+  }, [activeTripId, generatedInviteCode]);
+  const canShareInviteCode = Boolean(effectiveInviteCode);
 
   const inviteMessage = useMemo(() => {
-    if (!activeTripId) return '';
-    return `Hey! Join my trip "${activeTripName}" on TripSpend 🧳\n\nTap this link to join directly:\ntripspend:///?joinTripId=${encodeURIComponent(activeTripId)}\n\nOr open TripSpend → Settings → My Trips → Join tab and paste:\n${activeTripId}`;
-  }, [activeTripId, activeTripName]);
+    if (!effectiveInviteCode) return '';
+    return `Join my trip "${activeTripName}" on TripSpend! 🧳
+
+Invite Code:
+${effectiveInviteCode}
+
+Open TripSpend app → Settings → My Trips → Join and enter this 6-digit code.`;
+  }, [activeTripName, effectiveInviteCode]);
 
   const newTripTrimmed = useMemo(() => newTripName.trim(), [newTripName]);
 
@@ -61,6 +72,7 @@ export function TripSwitcher({
     setIsOpen(false);
     setEditingId(null);
     setEditingName('');
+    setGeneratedInviteCode(null);
     setTab('trips');
   }, []);
 
@@ -71,18 +83,51 @@ export function TripSwitcher({
     setEditingName('');
   }, [editingName, onRenameTrip]);
 
-  const handleCreateTrip = useCallback(() => {
+  const handleCreateTrip = useCallback(async () => {
+    if (creatingTrip) return;
     const name = sanitize(newTripTrimmed);
     if (!name) return;
-    onCreateTrip(name);
-    setNewTripName('');
-    closeMenu();
-  }, [closeMenu, newTripTrimmed, onCreateTrip]);
+    setCreatingTrip(true);
+    try {
+      const created = await onCreateTrip(name);
+      if (created === null) {
+        push({ title: 'Create failed', message: 'Could not create trip. Please try again.', variant: 'error' });
+        return;
+      }
+      setNewTripName('');
+      closeMenu();
+    } catch {
+      push({ title: 'Create failed', message: 'Could not create trip. Please try again.', variant: 'error' });
+    } finally {
+      setCreatingTrip(false);
+    }
+  }, [closeMenu, creatingTrip, newTripTrimmed, onCreateTrip, push]);
+
+  const handleGenerateInviteCode = useCallback(async () => {
+    if (generatingInviteCode) return;
+    setGeneratingInviteCode(true);
+    try {
+      const createdId = onGenerateInviteCode ? await onGenerateInviteCode() : null;
+      if (createdId && /^\d{6}$/.test(createdId)) {
+        setGeneratedInviteCode(createdId);
+        return;
+      }
+      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
+    } catch {
+      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
+    } finally {
+      setGeneratingInviteCode(false);
+    }
+  }, [generatingInviteCode, onGenerateInviteCode, onSelectTrip, push]);
 
   const handleJoinTrip = useCallback(async () => {
     if (!onJoinTrip || joining) return;
     const id = joinTripId.trim();
     if (!id) return;
+    if (!/^\d{6}$/.test(id)) {
+      push({ title: 'Invalid code', message: 'Enter a 6-digit invite code.', variant: 'error' });
+      return;
+    }
     setJoining(true);
     try {
       const joined = await onJoinTrip(id);
@@ -91,7 +136,7 @@ export function TripSwitcher({
         closeMenu();
         push({ title: 'Joined trip', message: 'You\'ve joined the shared trip.', variant: 'success' });
       } else {
-        push({ title: 'Trip not found', message: 'Check the Trip ID and try again.', variant: 'error' });
+        push({ title: 'Trip not found', message: 'Check the 6-digit invite code and try again.', variant: 'error' });
       }
     } finally {
       setJoining(false);
@@ -99,17 +144,23 @@ export function TripSwitcher({
   }, [closeMenu, joinTripId, joining, onJoinTrip, push]);
 
   const handleCopyId = useCallback(async () => {
-    if (!activeTripId) return;
-    try {
-      await navigator.clipboard.writeText(activeTripId);
-      push({ title: 'Trip ID copied', message: 'Share it with your friends to invite them.', variant: 'success', durationMs: 2500 });
-    } catch {
-      window.prompt('Copy Trip ID', activeTripId);
+    if (!effectiveInviteCode) {
+      push({ title: 'Invite unavailable', message: 'This trip does not have a 6-digit invite code yet.', variant: 'warning' });
+      return;
     }
-  }, [activeTripId, push]);
+    try {
+      await navigator.clipboard.writeText(effectiveInviteCode);
+      push({ title: 'Invite code copied', message: 'Ready to share with your friends.', variant: 'success', durationMs: 2500 });
+    } catch {
+      window.prompt('Copy Invite Code', effectiveInviteCode);
+    }
+  }, [effectiveInviteCode, push]);
 
   const handleShare = useCallback(async () => {
-    if (!inviteMessage) return;
+    if (!inviteMessage || !canShareInviteCode) {
+      push({ title: 'Invite unavailable', message: 'This trip does not have a 6-digit invite code yet.', variant: 'warning' });
+      return;
+    }
     if (navigator.share) {
       try {
         await navigator.share({ title: `Join ${activeTripName} on TripSpend`, text: inviteMessage });
@@ -122,7 +173,7 @@ export function TripSwitcher({
     } catch {
       window.prompt('Share this invite', inviteMessage);
     }
-  }, [activeTripName, inviteMessage, push]);
+  }, [activeTripName, canShareInviteCode, inviteMessage, push]);
 
   const handleDeleteTrip = useCallback((tripId: string, tripName: string) => {
     if (!window.confirm(`Delete "${tripName}"? This cannot be undone.`)) return;
@@ -205,7 +256,7 @@ export function TripSwitcher({
                           />
                         ) : (
                           <button
-                            onClick={() => { onSelectTrip(trip.id); closeMenu(); }}
+                            onClick={() => { setGeneratedInviteCode(null); onSelectTrip(trip.id); closeMenu(); }}
                             className="flex-1 text-left text-sm font-semibold text-slate-900 truncate"
                           >
                             {trip.name}
@@ -237,17 +288,18 @@ export function TripSwitcher({
                       type="text"
                       value={newTripName}
                       onChange={(e) => setNewTripName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateTrip()}
+                      onKeyDown={(e) => e.key === 'Enter' && void handleCreateTrip()}
                       placeholder="New trip name..."
                       maxLength={MAX_TRIP_NAME_LENGTH}
                       className="flex-1 text-sm px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400"
                     />
                     <button
-                      onClick={handleCreateTrip}
-                      disabled={!newTripTrimmed}
+                      onClick={() => { void handleCreateTrip(); }}
+                      disabled={!newTripTrimmed || creatingTrip}
                       className="px-3 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 flex items-center gap-1"
                     >
                       <Plus className="w-4 h-4" />
+                      {creatingTrip ? '...' : null}
                     </button>
                   </div>
                 </div>
@@ -261,34 +313,60 @@ export function TripSwitcher({
                       <UserPlus className="w-6 h-6 text-blue-600" />
                     </div>
                     <p className="text-sm font-bold text-slate-900">Invite to "{activeTripName}"</p>
-                    <p className="text-xs text-slate-500 mt-1">Share your Trip ID with friends so they can join.</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {canShareInviteCode
+                        ? 'Friends can join using your 6-digit invite code.'
+                        : 'This trip is local-only. Switch to a shared 6-digit trip code to invite others.'}
+                    </p>
                   </div>
 
-                  {/* Trip ID display */}
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Trip ID</p>
-                    <p className="text-xs font-mono text-slate-700 break-all leading-relaxed">{activeTripId}</p>
-                  </div>
+                  {!canShareInviteCode && (
+                    <button
+                      onClick={() => { void handleGenerateInviteCode(); }}
+                      disabled={generatingInviteCode}
+                      className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-bold disabled:opacity-50 hover:bg-blue-700 transition-colors"
+                    >
+                      {generatingInviteCode ? 'Generating code...' : 'Generate Invite Code'}
+                    </button>
+                  )}
+
+                  {/* Trip ID display - Clickable to copy */}
+                  <button
+                    onClick={() => { void handleCopyId(); }}
+                    className="w-full bg-slate-50 rounded-xl p-3 border border-slate-200 text-left active:bg-blue-50 transition-colors group"
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Trip Code</p>
+                      <Copy className="w-3 h-3 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                    </div>
+                    <p className="text-xs font-mono text-slate-700 break-all leading-relaxed">
+                      {canShareInviteCode ? effectiveInviteCode : 'Not available for this trip'}
+                    </p>
+                  </button>
 
                   {/* Action buttons */}
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => { void handleCopyId(); }}
-                      className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors"
+                      disabled={!canShareInviteCode}
+                      className="flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors"
                     >
                       <Copy className="w-3.5 h-3.5" />
-                      Copy ID
+                      Copy Invite Code
                     </button>
                     <button
                       onClick={() => { void handleShare(); }}
-                      className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors"
+                      disabled={!canShareInviteCode}
+                      className="flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors"
                     >
                       <Share2 className="w-3.5 h-3.5" />
-                      Share invite
+                      Share Invite
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-400 text-center">
-                    Friends need to sign in with Google, then go to Settings → My Trips → Join tab and paste the Trip ID.
+                  <p className="text-[10px] text-slate-400 text-center leading-relaxed">
+                    {canShareInviteCode
+                      ? 'Share only this code. Friends paste it in Settings → My Trips → Join tab.'
+                      : 'Tap Generate Invite Code to create a cloud trip code, then share it.'}
                   </p>
                 </div>
               )}
@@ -301,16 +379,16 @@ export function TripSwitcher({
                       <Link className="w-6 h-6 text-emerald-600" />
                     </div>
                     <p className="text-sm font-bold text-slate-900">Join a shared trip</p>
-                    <p className="text-xs text-slate-500 mt-1">Paste the Trip ID you received from a friend.</p>
+                    <p className="text-xs text-slate-500 mt-1">Enter the 6-digit invite code you received from a friend.</p>
                   </div>
                   <input
                     type="text"
                     value={joinTripId}
-                    onChange={(e) => setJoinTripId(e.target.value.trim().slice(0, MAX_JOIN_TRIP_ID_LENGTH))}
+                    onChange={(e) => setJoinTripId(e.target.value.replace(/\D/g, '').slice(0, MAX_JOIN_TRIP_ID_LENGTH))}
                     onKeyDown={(e) => e.key === 'Enter' && void handleJoinTrip()}
-                    placeholder="Paste Trip ID here..."
+                    placeholder="e.g. 482971"
                     maxLength={MAX_JOIN_TRIP_ID_LENGTH}
-                    className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    className="w-full text-sm px-3 py-2.5 border border-slate-200 rounded-xl font-mono tracking-[0.15em] focus:outline-none focus:ring-2 focus:ring-emerald-400"
                     autoFocus
                   />
                   <button

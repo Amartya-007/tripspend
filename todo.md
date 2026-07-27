@@ -4,6 +4,31 @@ Last reviewed: 2026-04-08
 
 Status: [x] done, [~] partial, [ ] pending
 
+## Member Management Spec
+
+### [x] Stable member identity migration
+- `MemberRecord` and `MemberRegistry` added to the core types
+- Legacy `participants[]` migration implemented and idempotent
+- Expense and settlement references now use `memberId` in the migrated flow
+
+### [x] Member registry and display helpers
+- `useMemberRegistry` added for add/rename/remove/restore flows
+- Duplicate-name disambiguation labels implemented
+- Offline member mutation queue added
+
+### [x] Collaborative identity and settlement wiring
+- `identityMap` now uses `uid -> memberId`
+- Settlement screens use member IDs and inactive-member labels
+- Creator fallback settlement payload fields are written and rendered
+
+### [x] Property coverage for member-management rules
+- Migration, identity, registry, queue, and settlement properties added
+- Firestore rules structure check added to the test suite
+
+### [~] Firestore emulator verification
+- Rules structure is checked in the property suite
+- Emulator-backed write-path verification still needs a dedicated run
+
 ## Core Enhancements (Existing)
 
 ### [ ] Add Recurring and Planned Expenses

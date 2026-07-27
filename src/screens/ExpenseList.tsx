@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 
 import { CustomSelect } from '../components/CustomSelect.tsx';
 import { DatePicker } from '../components/DatePicker.tsx';
+import { buildDisplayNameMap } from '../utils/memberDisplay';
 
 const formatAddedTime = (createdAt?: string) => {
   if (!createdAt) return 'Time unavailable';
@@ -41,16 +42,18 @@ const FlyoutSelect = ({
   label,
   value,
   options,
+  displayNames = {},
   onSave,
 }: {
   label: string;
   value: string;
   options: string[];
+  displayNames?: Record<string, string>;
   onSave: (value: string) => void;
 }) => {
   const [open, setOpen] = useState(false);
   const [draftValue, setDraftValue] = useState(value);
-  const selectedLabel = value || 'Select';
+  const selectedLabel = displayNames[value] || value || 'Select';
 
   const openSheet = () => {
     setDraftValue(value);
@@ -102,7 +105,7 @@ const FlyoutSelect = ({
                         : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    <span className="font-semibold">{option}</span>
+                    <span className="font-semibold">{displayNames[option] || option}</span>
                     {isSelected && <Check className="w-4 h-4 text-blue-600 flex-shrink-0" />}
                   </button>
                 );
@@ -152,16 +155,21 @@ const FlyoutSelect = ({
 interface ExpenseListProps {
   expenses: Expense[];
   setup: TripSetup | null;
-  onUndoDelete: () => void;
+  onDelete: (id: string) => void | Promise<void>;
+  onUndoDelete: () => void | Promise<void>;
   canUndoDelete: boolean;
+  isCollaborative?: boolean;
+  userUid?: string | null;
+  myMemberId?: string | null;
 }
 
 interface ExpenseRowProps {
   expense: Expense;
   onOpenExpense: (id: string) => void;
+  displayNames: Record<string, string>;
 }
 
-const ExpenseRow = React.memo(({ expense, onOpenExpense }: ExpenseRowProps) => {
+const ExpenseRow = React.memo(({ expense, onOpenExpense, displayNames }: ExpenseRowProps) => {
   const dateLabel = useMemo(() => format(new Date(expense.date), 'MMM dd, yyyy'), [expense.date]);
   const addedTimeLabel = useMemo(() => formatAddedTime(expense.createdAt), [expense.createdAt]);
   const shortTags = useMemo(() => (expense.tags || []).slice(0, 2), [expense.tags]);
@@ -203,7 +211,7 @@ const ExpenseRow = React.memo(({ expense, onOpenExpense }: ExpenseRowProps) => {
           {expense.paidBy && expense.paidBy !== 'Trip Wallet' && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px] flex-shrink-0">
               <User className="w-2.5 h-2.5" />
-              {expense.paidBy}
+              {displayNames[expense.paidBy] || expense.paidBy}
             </span>
           )}
         </div>
@@ -230,7 +238,9 @@ const ExpenseRow = React.memo(({ expense, onOpenExpense }: ExpenseRowProps) => {
 
 export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUndoDelete, canUndoDelete }) => {
   const navigate = useNavigate();
-  const people = useMemo(() => getTripPeople(setup), [setup]);
+  const registry = setup?.memberRegistry ?? {};
+  const people = useMemo(() => (setup?.memberRegistry ? Object.keys(setup.memberRegistry) : getTripPeople(setup)), [setup]);
+  const displayNames = useMemo(() => (Object.keys(registry).length > 0 ? buildDisplayNameMap(registry, true) : {}), [registry]);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [personFilter, setPersonFilter] = useState<string>('All');
   const [startDate, setStartDate] = useState('');
@@ -361,6 +371,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
                     label="Category"
                     value={categoryFilter}
                     options={uniqueCategories}
+                    displayNames={displayNames}
                     onSave={setCategoryFilter}
                   />
                 </div>
@@ -383,7 +394,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
                                 : 'bg-slate-100 text-slate-600 border border-slate-200 hover:border-slate-300'
                             }`}
                           >
-                            {person}
+                            {displayNames[person] || person}
                           </button>
                         ))}
                       </div>
@@ -569,6 +580,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
                 key={expense.id}
                 expense={expense}
                 onOpenExpense={openExpense}
+                displayNames={displayNames}
               />
             ))}
           </AnimatePresence>

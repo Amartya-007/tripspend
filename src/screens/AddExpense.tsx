@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Expense, TripSetup, getTripCategories, getTripPeople } from '../utils/calculations.ts';
+import { Expense, TripSetup, MemberRecord, getTripCategories, getTripPeople } from '../utils/calculations.ts';
 import { categorizeExpenseWithAI, isAIConfigured } from '../utils/aiCategorization.ts';
 import { formatCurrency } from '../utils/cn';
 import { AMOUNT_MAX, MAX_NOTE_LENGTH, MAX_TAGS_INPUT_LENGTH, MAX_TAGS_COUNT, COUNTER_THRESHOLD } from '../utils/constants.ts';
@@ -17,13 +17,19 @@ import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 const QUICK_AMOUNTS = [50, 100, 200, 500];
 
 interface AddExpenseProps {
-  onAdd: (expense: Expense) => void;
-  onUpdate: (expense: Expense) => void;
+  onAdd: (expense: Expense) => void | Promise<void>;
+  onUpdate: (expense: Expense) => void | Promise<void>;
   expenses: Expense[];
   setup: TripSetup | null;
+  activeMembers?: MemberRecord[];
+  displayNames?: Record<string, string>;
   presets?: Array<{ id: string; amount: number; category: string; note?: string; isFavorite: boolean }>;
   onAddPreset?: (preset: { amount: number; category: string; note?: string; isFavorite: boolean }) => void;
   onTogglePresetFavorite?: (id: string) => void;
+  onToggleFavorite?: (id: string) => void; // Added to match App.tsx usage
+  isCollaborative?: boolean;
+  userUid?: string | null;
+  myMemberId?: string | null;
 }
 
 const MAX_RECEIPT_DIMENSION = 1280;
@@ -116,6 +122,21 @@ const normalizeAmount = (raw: string) => {
   return Number(raw.replace(/,/g, '').trim());
 };
 
+const createExpenseId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `expense_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+};
+
+const areSamePeople = (left: string[], right: string[]) => {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+};
+
 const extractReceiptFields = (ocrText: string) => {
   const lines = ocrText.split('\n').map((line) => line.trim()).filter(Boolean);
   const lowerLines = lines.map((line) => line.toLowerCase());
@@ -174,11 +195,16 @@ type SpeechRecognitionCtor = new () => {
 
 const PaidBySelect: React.FC<{
   people: string[];
+  displayNames: Record<string, string>;
   value: string;
   disabled: boolean;
   onChange: (value: string) => void;
-}> = ({ people, value, disabled, onChange }) => {
+}> = ({ people, displayNames, value, disabled, onChange }) => {
   const selected = useMemo(() => (value ? [value] : []), [value]);
+  const triggerLabel = useMemo(() => {
+    if (!value) return 'Select payer';
+    return displayNames[value] || value;
+  }, [displayNames, value]);
 
   const handleChange = useCallback((next: string[]) => {
     if (!next[0]) return;
@@ -188,11 +214,12 @@ const PaidBySelect: React.FC<{
   return (
     <PeoplePickerSheet
       people={people}
+      displayNames={displayNames}
       selected={selected}
       onChange={handleChange}
       mode="single"
       disabled={disabled}
-      triggerLabel={value || 'Select payer'}
+      triggerLabel={triggerLabel}
       title="Paid By"
       subtitle="Pick who paid this expense"
       accent="emerald"
@@ -203,22 +230,24 @@ const PaidBySelect: React.FC<{
 
 const SplitSelect: React.FC<{
   people: string[];
+  displayNames: Record<string, string>;
   selected: string[];
   paidBy: string;
   disabled: boolean;
   onChange: (v: string[]) => void;
-}> = ({ people, selected, paidBy, disabled, onChange }) => {
+}> = ({ people, displayNames, selected, paidBy, disabled, onChange }) => {
   const label = selected.length === people.length
     ? 'Everyone'
     : selected.length === 0
     ? 'No one selected'
     : selected.length === 1
-    ? selected[0]
+    ? (displayNames[selected[0]] || selected[0])
     : `${selected.length} people`;
 
   return (
     <PeoplePickerSheet
       people={people}
+      displayNames={displayNames}
       selected={selected}
       onChange={onChange}
       mode="multiple"
@@ -269,6 +298,20 @@ const findDuplicate = (expenses: Expense[], amount: number, paidBy: string, date
   }) ?? null;
 };
 
+const sanitizeAmountInput = (raw: string): string | null => {
+  const cleaned = raw.replace(/,/g, '').trim();
+
+  if (cleaned === '') return '';
+  if (cleaned === '.') return null;
+  if ((cleaned.match(/\./g) || []).length > 1) return null;
+  if (!/^\d*(\.\d{0,2})?$/.test(cleaned)) return null;
+
+  const numeric = Number(cleaned);
+  if (!Number.isFinite(numeric) || numeric > AMOUNT_MAX) return null;
+
+  return cleaned;
+};
+
 const applyVoiceTranscript = (
   transcript: string,
   setAmount: (value: string) => void,
@@ -293,13 +336,41 @@ const applyVoiceTranscript = (
   }
 };
 
-export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expenses, setup }) => {
+export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expenses, setup, activeMembers = [], displayNames: propDisplayNames = {} }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isEditing = !!id;
 
-  const people = useMemo(() => getTripPeople(setup), [setup]);
+  const people = useMemo(() => {
+    if (setup?.memberRegistry) {
+      return Object.values(setup.memberRegistry)
+        .filter((member) => member.isActive)
+        .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt))
+        .map((member) => member.memberId);
+    }
+    if (activeMembers.length > 0) return activeMembers.map((member) => member.memberId);
+    return getTripPeople(setup);
+  }, [activeMembers, setup]);
+  const displayNames = useMemo(() => {
+    if (Object.keys(propDisplayNames).length > 0) return propDisplayNames;
+    if (setup?.memberRegistry) {
+      return Object.values(setup.memberRegistry).reduce<Record<string, string>>((acc, member) => {
+        acc[member.memberId] = member.name;
+        return acc;
+      }, {});
+    }
+    if (activeMembers.length > 0) {
+      return activeMembers.reduce<Record<string, string>>((acc, member) => {
+        acc[member.memberId] = member.name;
+        return acc;
+      }, {});
+    }
+    return people.reduce<Record<string, string>>((acc, person) => {
+      acc[person] = person;
+      return acc;
+    }, {});
+  }, [activeMembers, people, propDisplayNames, setup?.memberRegistry]);
   const categories = useMemo(() => getTripCategories(setup), [setup]);
   const dailyLimit = useMemo(
     () => (setup ? (setup.totalBudget / Math.max(1, setup.peopleCount)) : 0),
@@ -308,6 +379,11 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const paidByPeople = useMemo(() => (people.length > 0 ? people : ['Trip Wallet']), [people]);
 
   const [amount, setAmount] = useState('');
+  const updateAmount = useCallback((value: string) => {
+    const nextAmount = sanitizeAmountInput(value);
+    if (nextAmount === null) return;
+    setAmount(nextAmount);
+  }, []);
 
   const amountError = useMemo(() => validateAmount(amount) ?? '', [amount]);
   const [category, setCategory] = useState<Expense['category']>('Food');
@@ -322,6 +398,9 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   const [showDuplicateWarning, setShowDuplicateWarning] = useState<Expense | null>(null);
   const [showLargeExpenseConfirm, setShowLargeExpenseConfirm] = useState(false);
   const [pendingExpense, setPendingExpense] = useState<Expense | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const submitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSubmittingRef = useRef(false);
 
   const isLocked = setup?.lockPreviousDays && isBefore(startOfDay(parseISO(date)), startOfDay(new Date()));
   const tripStartDate = useMemo(() => (setup?.startDate ? startOfDay(parseISO(setup.startDate)) : null), [setup?.startDate]);
@@ -366,16 +445,19 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     if (isEditing) return;
 
     if (people.length === 0) {
-      setPaidBy('Trip Wallet');
-      setSplitWith([]);
+      setPaidBy((prev) => (prev === 'Trip Wallet' ? prev : 'Trip Wallet'));
+      setSplitWith((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
     setPaidBy((prev) => (people.includes(prev) ? prev : people[0]));
     setSplitWith((prev) => {
-      if (prev.length === 0) return people;
+      if (prev.length === 0) return areSamePeople(prev, people) ? prev : people;
       const filtered = prev.filter((person) => people.includes(person));
-      return filtered.length > 0 ? filtered : people;
+      if (filtered.length > 0) {
+        return areSamePeople(prev, filtered) ? prev : filtered;
+      }
+      return areSamePeople(prev, people) ? prev : people;
     });
   }, [isEditing, people]);
 
@@ -413,33 +495,120 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     }
   }, [categories, isEditing]);
 
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
+  const clearSubmissionState = useCallback(() => {
+    isSubmittingRef.current = false;
+    setIsSaving(false);
+    if (submitTimeoutRef.current) {
+      clearTimeout(submitTimeoutRef.current);
+      submitTimeoutRef.current = null;
+    }
+  }, []);
+
+  const saveExpense = useCallback(async (expenseToSave: Expense) => {
+    console.log('[AddExpense] saveExpense START:', { 
+      id: expenseToSave.id, 
+      isEditing,
+      hasOnAdd: !!onAdd,
+      hasOnUpdate: !!onUpdate,
+      isSubmittingRef: isSubmittingRef.current,
+    });
+
+    if (isSubmittingRef.current) {
+      console.warn('[AddExpense] saveExpense: already submitting, early exit');
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setIsSaving(true);
     setError('');
+
+    try {
+      console.log('[AddExpense] Saving expense:', expenseToSave);
+      console.log('[AddExpense] Setup:', setup);
+      
+      if (!onAdd && !onUpdate) {
+        throw new Error('onAdd and onUpdate callbacks are not defined');
+      }
+
+      const savePromise = isEditing ? onUpdate(expenseToSave) : onAdd(expenseToSave);
+      console.log('[AddExpense] saveExpense: callback returned, is promise?', savePromise instanceof Promise);
+
+      if (savePromise instanceof Promise) {
+        console.log('[AddExpense] awaiting Promise with 5s timeout');
+        await Promise.race([
+          savePromise,
+          new Promise<void>((_, reject) => {
+            submitTimeoutRef.current = setTimeout(() => {
+              console.warn('[AddExpense] Save timeout - but proceeding with navigation');
+              reject(new Error('Save timeout - but proceeding with navigation'));
+            }, 5000);
+          }),
+        ]);
+      }
+
+      console.log('[AddExpense] Save completed successfully, navigating to /expenses');
+      navigate('/expenses');
+    } catch (saveError) {
+      console.error('[AddExpense] Unexpected save error:', saveError);
+      setError('Could not save expense. Please try again.');
+      throw saveError;
+    } finally {
+      clearSubmissionState();
+    }
+  }, [clearSubmissionState, isEditing, navigate, onAdd, onUpdate, setup]);
+
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('[AddExpense] handleSubmit: form submitted, checking state', { isSaving, isSubmittingRef: isSubmittingRef.current, isLocked });
+    
+    if (isSaving || isSubmittingRef.current) {
+      console.warn('[AddExpense] handleSubmit: early exit - already submitting or saving');
+      return;
+    }
+
+    if (submitTimeoutRef.current) {
+      clearTimeout(submitTimeoutRef.current);
+      submitTimeoutRef.current = null;
+    }
+
+    setError('');
+    console.log('[AddExpense] handleSubmit called', { amount, date, paidBy, participantCount: splitWith.length, isEditing, hasOnAdd: !!onAdd, hasOnUpdate: !!onUpdate });
+    
     if (!amount || isNaN(parseFloat(amount))) {
-      setError('Please enter a valid amount.');
+      const err = 'Please enter a valid amount.';
+      console.error('[AddExpense] Validation error:', err);
+      setError(err);
       return;
     }
     if (amountError) {
+      console.error('[AddExpense] Amount error:', amountError);
       setError(amountError);
       return;
     }
     if (isLocked) {
-      setError('Editing is locked for previous days. Change the date or disable day lock in settings.');
+      const err = 'Editing is locked for previous days. Change the date or disable day lock in settings.';
+      console.error('[AddExpense] Edit locked:', err);
+      setError(err);
       return;
     }
 
     const amountNum = parseFloat(amount);
     if (amountNum <= 0 || amountNum > AMOUNT_MAX) {
-      setError(`Amount must be between ₹0.01 and ₹${AMOUNT_MAX.toLocaleString('en-IN')}.`);
+      const err = `Amount must be between ₹0.01 and ₹${AMOUNT_MAX.toLocaleString('en-IN')}.`;
+      console.error('[AddExpense] Amount out of range:', { amountNum, AMOUNT_MAX });
+      setError(err);
       return;
     }
     const tagsError = validateTags(tagsInput);
-    if (tagsError) { setError(tagsError); return; }
+    if (tagsError) { 
+      console.error('[AddExpense] Tags error:', tagsError);
+      setError(tagsError); 
+      return; 
+    }
     const tags = parseTags(tagsInput);
 
     const expenseData: Expense = {
-      id: isEditing ? id : crypto.randomUUID(),
+      id: isEditing ? id : createExpenseId(),
       amount: amountNum,
       category,
       note: note.trim(),
@@ -452,52 +621,73 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       receiptName: receipts[0]?.name,
       ...(!isEditing && { createdAt: new Date().toISOString() }),
     };
+    
+    console.log('[AddExpense] Expense data prepared:', { 
+      id: expenseData.id, 
+      amount: expenseData.amount, 
+      participants: expenseData.participants?.length ?? 0,
+      paidBy: expenseData.paidBy 
+    });
 
     if (!isEditing) {
       const dup = findDuplicate(expenses, amountNum, paidBy, date, id);
       if (dup) {
         setPendingExpense(expenseData);
         setShowDuplicateWarning(dup);
+        clearSubmissionState();
         return;
       }
 
       if (dailyLimit > 0 && amountNum > dailyLimit) {
         setPendingExpense(expenseData);
         setShowLargeExpenseConfirm(true);
+        clearSubmissionState();
         return;
       }
     }
 
-    if (isEditing) {
-      onUpdate(expenseData);
-    } else {
-      onAdd(expenseData);
+    try {
+      await saveExpense(expenseData);
+    } catch (saveError) {
+      console.error('[AddExpense] handleSubmit: save failed with error:', saveError);
+      return;
     }
-    navigate('/expenses');
-  }, [amount, category, dailyLimit, date, expenses, id, isEditing, isLocked, navigate, onAdd, onUpdate, paidBy, people, receipts, splitWith, tagsInput, note]);
+  }, [amount, amountError, category, clearSubmissionState, dailyLimit, date, expenses, id, isEditing, isLocked, isSaving, paidBy, people, receipts, saveExpense, splitWith, tagsInput, note]);
 
-  const commitExpense = useCallback(() => {
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (submitTimeoutRef.current) {
+        clearTimeout(submitTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const commitExpense = useCallback(async () => {
     if (!pendingExpense) return;
-    if (isEditing) onUpdate(pendingExpense);
-    else onAdd(pendingExpense);
-    setPendingExpense(null);
     setShowDuplicateWarning(null);
     setShowLargeExpenseConfirm(false);
-    navigate('/expenses');
-  }, [pendingExpense, isEditing, onUpdate, onAdd, navigate]);
+    setPendingExpense(null);
+    await saveExpense(pendingExpense);
+  }, [pendingExpense, saveExpense]);
 
   const clearDuplicateWarning = useCallback(() => {
     setShowDuplicateWarning(null);
     setPendingExpense(null);
-  }, []);
+    clearSubmissionState();
+  }, [clearSubmissionState]);
 
   const clearLargeExpenseWarning = useCallback(() => {
     setShowLargeExpenseConfirm(false);
     setPendingExpense(null);
-  }, []);
+    clearSubmissionState();
+  }, [clearSubmissionState]);
 
   const handleQuickAmount = useCallback((val: number) => {
-    setAmount(prev => (parseFloat(prev) || 0) + val + '');
+    setAmount((prev) => {
+      const nextAmount = String((parseFloat(prev) || 0) + val);
+      return sanitizeAmountInput(nextAmount) ?? prev;
+    });
   }, []);
 
   const addReceiptFromDataUrl = useCallback(async (dataUrl: string, fileName?: string) => {
@@ -544,7 +734,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       const { data } = await recognize(receipts[0].image, 'eng');
       const extracted = extractReceiptFields(data.text || '');
 
-      if (extracted.amount && (!amount || parseFloat(amount) <= 0)) setAmount(extracted.amount.toString());
+      if (extracted.amount && (!amount || parseFloat(amount) <= 0)) updateAmount(extracted.amount.toString());
       if (extracted.date) {
         const parsedDate = parseISO(extracted.date);
         if (isValid(parsedDate)) setDate(format(parsedDate, 'yyyy-MM-dd'));
@@ -562,7 +752,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     } finally {
       setOcrLoading(false);
     }
-  }, [receipts, amount, note, categories]);
+  }, [amount, categories, note, receipts, updateAmount]);
 
   const handleVoiceAdd = useCallback(async () => {
     setError('');
@@ -578,7 +768,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         const result = await SpeechRecognition.start({ language: 'en-IN', maxResults: 1, partialResults: false, popup: true, prompt: 'Speak your expense, for example: Spent 250 on food' });
         const transcript = result.matches?.[0];
         if (!transcript) { setError('Could not hear clearly. Try again.'); return; }
-        applyVoiceTranscript(transcript, setAmount, setCategory, setNote);
+        applyVoiceTranscript(transcript, updateAmount, setCategory, setNote);
         return;
       } catch {
         setError('Voice recognition failed. Please try again.');
@@ -596,10 +786,10 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     recognition.lang = 'en-IN';
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.onresult = (event) => applyVoiceTranscript(event.results[0][0].transcript, setAmount, setCategory, setNote);
+    recognition.onresult = (event) => applyVoiceTranscript(event.results[0][0].transcript, updateAmount, setCategory, setNote);
     recognition.onerror = () => setError('Voice recognition failed. Please try again.');
     recognition.start();
-  }, []);
+  }, [updateAmount]);
 
   return (
     <div className="page-shell">
@@ -626,7 +816,8 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         onSubmit={handleSubmit} 
-        className="space-y-6 bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100"
+        className="space-y-6 bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 relative z-0"
+        style={{ pointerEvents: 'auto' }}
       >
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -645,16 +836,16 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
           </div>
           <p className="text-[11px] text-slate-400 mb-2">e.g. "Spent 250 on food"</p>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             required
             autoFocus={!isEditing}
             disabled={isLocked}
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => updateAmount(e.target.value)}
             placeholder="0.00"
-            min="0"
-            max="9999999"
-            step="0.01"
+            pattern="^\d*(\.\d{0,2})?$"
+            maxLength={10}
             className={`w-full px-4 py-4 text-2xl font-bold rounded-2xl border focus:outline-none focus:ring-2 transition-all disabled:opacity-50 ${
               amountError
                 ? 'border-red-400 focus:ring-red-400 bg-red-50'
@@ -697,30 +888,33 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
           <DatePicker value={date} onChange={setDate} disabled={Boolean(isLocked)} />
         </div>
 
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-            <User className="w-4 h-4 text-slate-400" />
-            Paid by
-          </label>
-          <PaidBySelect people={paidByPeople} value={paidBy} onChange={setPaidBy} disabled={Boolean(isLocked)} />
-        </div>
-
-        {people.length > 1 && (
+        <div className={people.length > 1 ? 'grid grid-cols-1 gap-4 md:grid-cols-2' : 'space-y-4'}>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-              <Users className="w-4 h-4 text-slate-400" />
-              Split between
-              <span className="ml-auto text-xs font-normal text-slate-400">{splitWith.length} of {people.length}</span>
+              <User className="w-4 h-4 text-slate-400" />
+              Paid by
             </label>
-            <SplitSelect
-              people={people}
-              selected={splitWith}
-              paidBy={paidBy}
-              disabled={Boolean(isLocked)}
-              onChange={setSplitWith}
-            />
+            <PaidBySelect people={paidByPeople} displayNames={displayNames} value={paidBy} onChange={setPaidBy} disabled={Boolean(isLocked)} />
           </div>
-        )}
+
+          {people.length > 1 && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                <Users className="w-4 h-4 text-slate-400" />
+                Split between
+                <span className="ml-auto text-xs font-normal text-slate-400">{splitWith.length} of {people.length}</span>
+              </label>
+              <SplitSelect
+                people={people}
+                displayNames={displayNames}
+                selected={splitWith}
+                paidBy={paidBy}
+                disabled={Boolean(isLocked)}
+                onChange={setSplitWith}
+              />
+            </div>
+          )}
+        </div>
 
         <div>
           <label className="block text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
@@ -855,11 +1049,11 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
 
         <button
           type="submit"
-          disabled={isLocked}
+          disabled={isLocked || isSaving}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2"
         >
           {isEditing ? <Save className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-          {isEditing ? 'Update Expense' : 'Save Expense'}
+          {isSaving ? 'Saving...' : (isEditing ? 'Update Expense' : 'Save Expense')}
         </button>
       </motion.form>
 

@@ -6,6 +6,7 @@ import { formatCurrency } from '../utils/cn';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addDays } from 'date-fns';
 import { DatePicker } from '../components/DatePicker.tsx';
+import { NotificationCard } from '../components/NotificationCard.tsx';
 import { Capacitor } from '@capacitor/core';
 import { Contacts, ContactPayload } from '@capacitor-community/contacts';
 import {
@@ -66,6 +67,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   const [memberContactSearch, setMemberContactSearch] = useState('');
   const [memberContactChoices, setMemberContactChoices] = useState<MemberContactChoice[]>([]);
   const [selectedMemberContactIds, setSelectedMemberContactIds] = useState<string[]>([]);
+  const [setupWarning, setSetupWarning] = useState('');
 
   const navigate = useNavigate();
 
@@ -81,6 +83,18 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
     const selectedIds = new Set(selectedMemberContactIds);
     return memberContactChoices.filter((contact) => selectedIds.has(contact.contactId));
   }, [memberContactChoices, selectedMemberContactIds]);
+  const setupNotification = useMemo(
+    () => (setupWarning
+      ? {
+        id: Date.now(),
+        title: 'Please check this',
+        message: setupWarning,
+        variant: 'warning' as const,
+        durationMs: 4200,
+      }
+      : null),
+    [setupWarning]
+  );
 
   useEffect(() => {
     if (endDate < startDate) {
@@ -90,16 +104,17 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
 
   const handlePeopleCountNext = useCallback(() => {
     if (peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE) {
-      alert(`Please enter between ${MIN_PEOPLE} and ${MAX_PEOPLE} people.`);
+      setSetupWarning(`Please enter between ${MIN_PEOPLE} and ${MAX_PEOPLE} people.`);
       return;
     }
     if (!initialData) {
       const cleanName = tripName.trim();
       if (!cleanName) {
-        alert('Please name your trip before continuing.');
+        setSetupWarning('Please name your trip before continuing.');
         return;
       }
     }
+    setSetupWarning('');
     if (peopleNum >= participants.length) {
       setParticipants(prev =>
         Array.from({ length: peopleNum }, (_, i) => {
@@ -198,7 +213,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
 
   const openMemberContactsPicker = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) {
-      alert('Contact picker is available on native app builds only.');
+      setSetupWarning('Contact picker is available on native app builds only.');
       return;
     }
 
@@ -212,7 +227,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
       }
 
       if (permission.contacts !== 'granted' && permission.contacts !== 'limited') {
-        alert('Contacts permission denied. You can still enter names manually.');
+        setSetupWarning('Contacts permission denied. You can still enter names manually.');
         return;
       }
 
@@ -238,7 +253,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
     } catch (error) {
       console.error('Failed to load contacts', error);
       setMemberContactPickerError('Could not load contacts on this device. You can still type names manually.');
-      alert('Could not load contacts. You can still type names manually.');
+      setSetupWarning('Could not load contacts. You can still type names manually.');
     } finally {
       setMemberContactPickerLoading(false);
     }
@@ -276,15 +291,15 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
 
   const handleSave = useCallback(() => {
     if (peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE) {
-      alert(`People count must be between ${MIN_PEOPLE} and ${MAX_PEOPLE}.`);
+      setSetupWarning(`People count must be between ${MIN_PEOPLE} and ${MAX_PEOPLE}.`);
       return;
     }
     if (budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON) {
-      alert(`Budget per person must be between 1 and ${formatCurrency(MAX_BUDGET_PER_PERSON)}.`);
+      setSetupWarning(`Budget per person must be between 1 and ${formatCurrency(MAX_BUDGET_PER_PERSON)}.`);
       return;
     }
     if (endDate < startDate) {
-      alert('End date cannot be before start date.');
+      setSetupWarning('End date cannot be before start date.');
       return;
     }
 
@@ -292,11 +307,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
       if (!initialData && onNameTrip) {
         const cleanName = tripName.trim();
         if (!cleanName) {
-          alert('Please name your trip before starting.');
+          setSetupWarning('Please name your trip before starting.');
           return;
         }
         onNameTrip(cleanName);
       }
+
+      setSetupWarning('');
 
       onSave({
         peopleCount: peopleNum,
@@ -319,6 +336,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   }, [budgetNum, categories, endDate, initialData, lockPrevious, navigate, onNameTrip, onSave, participantPhoneNumbers, participants, peopleNum, startDate, totalBudget, tripName]);
 
   const handlePeopleCountChange = useCallback((value: string) => {
+    setSetupWarning('');
     const digitsOnly = value.replace(/\D/g, '');
     if (!digitsOnly) {
       setPeopleCount('');
@@ -330,6 +348,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   }, []);
 
   const handleBudgetChange = useCallback((value: string) => {
+    setSetupWarning('');
     if (!BUDGET_REGEX.test(value)) return;
     if (!value) {
       setBudget('');
@@ -346,6 +365,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
   }, []);
 
   const handleTripNameChange = useCallback((value: string) => {
+    setSetupWarning('');
     setTripName(value.slice(0, MAX_TRIP_NAME_LENGTH));
   }, []);
 
@@ -367,6 +387,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 px-4 py-7 flex flex-col items-center justify-center">
+      <NotificationCard notification={setupNotification} onClose={() => setSetupWarning('')} />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

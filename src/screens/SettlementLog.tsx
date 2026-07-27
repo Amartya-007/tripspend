@@ -5,6 +5,8 @@ import { formatCurrency } from '../utils/cn';
 import { SettlementHistoryEntry } from '../utils/settlementHistory.ts';
 import { useSettlementHistory } from '../hooks/useSettlementHistory.ts';
 import { motion, AnimatePresence } from 'motion/react';
+import { TripSetup } from '../utils/calculations.ts';
+import { buildDisplayNameMap } from '../utils/memberDisplay';
 
 const historyDateFmt = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
@@ -16,11 +18,14 @@ const historyDateFmt = new Intl.DateTimeFormat('en-IN', {
 interface SettlementLogProps {
   tripId?: string | null;
   isCollaborative?: boolean;
+  userUid?: string | null;
+  setup?: TripSetup | null;
 }
 
 export const SettlementLog: React.FC<SettlementLogProps> = ({
   tripId = null,
   isCollaborative = false,
+  setup = null,
 }) => {
   const navigate = useNavigate();
   const { entries, clear } = useSettlementHistory({
@@ -36,14 +41,24 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
     return { settled, undone };
   }, [entries]);
 
+  const displayNames = useMemo(() => {
+    const registry = setup?.memberRegistry ?? {};
+    if (!registry || Object.keys(registry).length === 0) return {} as Record<string, string>;
+    return buildDisplayNameMap(registry);
+  }, [setup]);
+
+  const resolveMemberName = useCallback((value: string) => displayNames[value] || value, [displayNames]);
+
   const displayEntries = useMemo(() => {
     return entries.map((entry) => ({
       ...entry,
+      fromLabel: resolveMemberName(entry.from),
+      toLabel: resolveMemberName(entry.to),
       actionLabel: entry.action === 'settled' ? 'paid' : 're-opened',
       dateLabel: historyDateFmt.format(new Date(entry.createdAt)),
       isSettled: entry.action === 'settled',
     }));
-  }, [entries]);
+  }, [entries, resolveMemberName]);
 
   const goBack = useCallback(() => {
     navigate('/settings');
@@ -115,7 +130,7 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800">
-                    {entry.from} {entry.actionLabel} {entry.to}
+                    {entry.fromLabel} {entry.actionLabel} {entry.toLabel}
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {formatCurrency(entry.amount)} · {entry.dateLabel}

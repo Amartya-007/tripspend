@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import { TripData, TripSetup, Expense, Trip } from '../utils/calculations.ts';
 import { indexedGet, indexedSet } from '../utils/indexedStorage';
+import { migrateLegacyParticipants } from '../utils/migration.ts';
 
 const STORAGE_KEY = 'tripspend_data';
 const TRIPS_STORAGE_KEY = 'tripspend_trips';
@@ -30,12 +31,6 @@ const normalizeSetup = (setup: TripSetup | null): TripSetup | null => {
   const computedTotalBudget = peopleCount * budgetPerPerson;
   const totalBudget = Number(raw.totalBudget);
 
-  // If participants exist, use them; otherwise generate default names
-  let participants = raw.participants || [];
-  if (!participants.length && peopleCount > 0) {
-    participants = Array.from({ length: peopleCount }, (_, i) => `Person ${i + 1}`);
-  }
-
   // If customCategories exist, use them; otherwise use defaults
   const customCategories = raw.customCategories && raw.customCategories.length > 0
     ? raw.customCategories
@@ -48,7 +43,8 @@ const normalizeSetup = (setup: TripSetup | null): TripSetup | null => {
     startDate: raw.startDate,
     endDate: raw.endDate,
     lockPreviousDays: Boolean(raw.lockPreviousDays),
-    participants,
+    participants: Array.isArray(raw.participants) ? raw.participants : undefined,
+    memberRegistry: raw.memberRegistry,
     participantPhoneNumbers: raw.participantPhoneNumbers || {},
     participantUpiIds: raw.participantUpiIds || {},
     customCategories,
@@ -57,6 +53,12 @@ const normalizeSetup = (setup: TripSetup | null): TripSetup | null => {
 
 const getPeople = (setup: TripSetup | null) => {
   if (!setup) return [];
+  if (setup.memberRegistry) {
+    return Object.values(setup.memberRegistry)
+      .filter((member) => member.isActive)
+      .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt))
+      .map((member) => member.name);
+  }
   if (Array.isArray(setup.participants) && setup.participants.length > 0) {
     return setup.participants;
   }
@@ -84,16 +86,17 @@ const normalizeExpense = (expense: Expense, setup: TripSetup | null): Expense =>
 };
 
 const normalizeData = (data: TripData): TripData => {
-  const setup = normalizeSetup(data.setup);
+  const migrated = migrateLegacyParticipants(data);
+  const setup = normalizeSetup(migrated.setup);
 
   return {
     setup,
-    expenses: data.expenses.map((expense) => ({
+    expenses: migrated.expenses.map((expense) => ({
       ...normalizeExpense(expense, setup),
       createdAt: expense.createdAt || nowIso(),
       updatedAt: expense.updatedAt || expense.createdAt || nowIso(),
     })),
-    deletedExpenseMap: data.deletedExpenseMap || {},
+    deletedExpenseMap: migrated.deletedExpenseMap || {},
   };
 };
 
@@ -220,6 +223,7 @@ export function useTripData() {
   // Persist trips to localStorage
   useEffect(() => {
     try {
+      console.log('[TripData] Persisting to localStorage:', trips.map(t => ({ id: t.id, name: t.name })));
       writeStoredObject(TRIPS_STORAGE_KEY, trips);
     } catch (error) {
       try {
@@ -282,10 +286,13 @@ export function useTripData() {
 
     const hydrateFromIndexedDb = async () => {
       try {
+        console.log('[TripData] Starting IndexedDB hydration...');
         const [savedTrips, savedPresets] = await Promise.all([
           indexedGet<Trip[]>(TRIPS_IDB_KEY),
           indexedGet<QuickAddPreset[]>(PRESETS_IDB_KEY),
         ]);
+
+        console.log('[TripData] IndexedDB hydration loaded:', savedTrips?.map(t => ({ id: t.id, name: t.name })) || 'none');
 
         if (!cancelled && Array.isArray(savedTrips) && savedTrips.length > 0) {
           setTrips(prev => {
@@ -296,14 +303,18 @@ export function useTripData() {
             const idbUpdated = Math.max(...savedTrips.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()));
             const currentUpdated = Math.max(...prev.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()), 0);
 
+            console.log('[TripData] Hydration decision:', { idbTotal, currentTotal, idbUpdated, currentUpdated, current: prev.map(t => t.id) });
+
             // Prefer whichever has more data, or if equal prefer more recent
             if (idbTotal > currentTotal || (idbTotal === currentTotal && idbUpdated > currentUpdated)) {
+              console.log('[TripData] Preferring IDB data over current');
               return savedTrips.map((trip) => ({
                 ...trip,
                 updatedAt: trip.updatedAt || trip.createdAt || nowIso(),
                 data: normalizeData(trip.data),
               }));
             }
+            console.log('[TripData] Keeping current trips (not overwriting with IDB)');
             return prev;
           });
           setActiveTrip((prev) => {
@@ -338,6 +349,13 @@ export function useTripData() {
 
   const saveSetup = useCallback((setup: TripSetup) => {
     updateCurrentTrip(prev => {
+      if (prev.setup?.memberRegistry || setup.memberRegistry) {
+        return {
+          ...prev,
+          setup,
+        };
+      }
+
       // Create name mapping using name-to-name comparison (not position-based)
       // to handle deletions and reordering correctly
       const oldParticipants = getPeople(prev.setup);
@@ -518,8 +536,14 @@ export function useTripData() {
         deletedExpenseMap: {},
       },
     };
-    setTrips(prev => [...prev, newTrip]);
+    console.log('[TripData] Creating new trip:', { id: newTrip.id, name, hasSetup: Boolean(initialSetup) });
+    setTrips(prev => {
+      const updated = [...prev, newTrip];
+      console.log('[TripData] Trips after create:', updated.map(t => ({ id: t.id, name: t.name })));
+      return updated;
+    });
     setActiveTrip(newTrip.id);
+    console.log('[TripData] Active trip set to:', newTrip.id);
     return newTrip.id;
   }, []);
 
@@ -601,6 +625,8 @@ export function useTripData() {
   useEffect(() => {
     void indexedSet(TRIPS_IDB_KEY, trips).catch((error) => {
       console.error('Failed to persist full trips in IndexedDB', error);
+    }).then(() => {
+      console.log('[TripData] Persisted to IndexedDB:', trips.map(t => ({ id: t.id, name: t.name })));
     });
   }, [trips]);
 

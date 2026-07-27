@@ -7,6 +7,7 @@ type Mode = 'single' | 'multiple';
 
 interface PeoplePickerSheetProps {
   people: string[];
+  displayNames?: Record<string, string>;
   selected: string[];
   onChange: (next: string[]) => void;
   mode?: Mode;
@@ -52,6 +53,7 @@ const ACCENT_STYLES: Record<Accent, { triggerOpen: string; ring: string; button:
 
 export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = React.memo(({
   people,
+  displayNames = {},
   selected,
   onChange,
   mode = 'multiple',
@@ -78,8 +80,11 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = React.memo(({
   const filteredPeople = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return people;
-    return people.filter((person) => person.toLowerCase().includes(q));
-  }, [people, searchQuery]);
+    return people.filter((person) => {
+      const label = displayNames[person] || person;
+      return person.toLowerCase().includes(q) || label.toLowerCase().includes(q);
+    });
+  }, [displayNames, people, searchQuery]);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
@@ -247,7 +252,7 @@ export const PeoplePickerSheet: React.FC<PeoplePickerSheetProps> = React.memo(({
                           {person[0]?.toUpperCase() || '?'}
                         </div>
                         <span className={`text-sm font-semibold flex-1 text-left ${isSelected ? 'text-slate-900' : 'text-slate-500'}`}>
-                          {person}
+                            {displayNames[person] || person}
                         </span>
                         {showPayerBadge && person === paidBy && (
                           <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">paid</span>
