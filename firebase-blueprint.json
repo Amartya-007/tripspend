@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "Trip": {
+      "title": "Trip",
+      "description": "Group trip setup and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "members": { "type": "array" },
+        "participants": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "members"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Individual trip expense record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "paidBy": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "amount", "category", "date", "paidBy"]
+    },
+    "Settlement": {
+      "title": "Settlement",
+      "description": "Settlement payment status record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "paid", "completed"] },
+        "fromUserId": { "type": "string" },
+        "toUserId": { "type": "string" }
+      },
+      "required": ["id", "from", "to", "amount", "status"]
+    },
+    "SettlementHistory": {
+      "title": "SettlementHistory",
+      "description": "Audit trail log for settlements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action"]
+    }
+  },
+  "firestore": {
+    "/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "Collaborative shared trip document"
+    },
+    "/trips/{tripId}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Expense subdocument under a trip"
+    },
+    "/trips/{tripId}/settlements/{settlementId}": {
+      "schema": "Settlement",
+      "description": "Settlement state record under a trip"
+    },
+    "/trips/{tripId}/settlementHistory/{entryId}": {
+      "schema": "SettlementHistory",
+      "description": "Settlement audit log entry under a trip"
+    },
+    "/users/{userId}/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "User personal trip backup document"
+    },
+    "/users/{userId}/trips/{tripId}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "User personal trip expense backup"
+    }
+  }
+}

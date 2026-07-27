@@ -1,0 +1,8 @@
+{
+  "name": "TripSpend",
+  "description": "A lightweight group trip expense tracker to manage shared budgets and spending.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

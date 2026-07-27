@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Environment variables
+.env*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.firebase/
+
+# TypeScript
+*.tsbuildinfo
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# Firebase config — contains API keys, do not commit
+android/app/google-services.json
+ios/GoogleService-Info.plist
+
+# Capacitor
+android/app/src/main/assets/public/
+
+# iOS (if added later)
+ios/App/Pods/
+ios/App/App/public/
+*.xcworkspace/xcuserdata/
+
+# Local security rules notes
+/rule.md
+firebase-applet-config.json
+
+# AI assistant config files (Cursor, Claude, Windsurf, OpenCode, etc.)
+kiro
+.vscode
+.cursorrules
+.windsurfrules
+.opencode.json
+.code-review-graph
+.mcp.json
+.claude/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+COPILOT.md
+todo.md
+.qodo
+.continue

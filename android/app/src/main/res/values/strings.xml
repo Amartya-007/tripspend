@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TripSpend</string>
+    <string name="title_activity_main">TripSpend</string>
+    <string name="package_name">com.tripspend.app</string>
+    <string name="custom_url_scheme">com.tripspend.app</string>
+    <string name="shortcut_add_short">Add Expense</string>
+    <string name="shortcut_add_long">Quick Add Expense</string>
+</resources>
