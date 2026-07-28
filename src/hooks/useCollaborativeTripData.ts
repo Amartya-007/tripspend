@@ -28,6 +28,7 @@ export function useCollaborativeTripData({ userUid, enabled, onRemoteUpdate }: U
   const {
     tripDocs,
     tripDocsRef,
+    tripsLoaded,
     activeTrip,
     setActiveTripWithPreserve,
     activeTripIds,
@@ -209,6 +210,7 @@ export function useCollaborativeTripData({ userUid, enabled, onRemoteUpdate }: U
     mergeTripFromSync,
     importLocalTrips: tripMutations.importLocalTrips,
     cloudAccessDenied,
+    tripsLoaded,
     addPreset,
     updatePreset,
     deletePreset,

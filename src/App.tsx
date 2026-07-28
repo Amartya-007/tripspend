@@ -31,7 +31,6 @@ import { buildDisplayNameMap } from './utils/memberDisplay';
 
 const EXIT_PATHS = new Set(['/', '/setup']);
 const ONBOARDING_KEY = 'tripspend_onboarding_done_v1';
-const AUTH_PROMPT_DISMISSED_KEY = 'tripspend_auth_prompt_dismissed_v1';
 const SYNC_QUEUE_KEY = 'tripspend_sync_queue_v1';
 const PENDING_JOIN_KEY = 'tripspend_pending_join_id';
 const WORKSPACE_MODE_KEY = 'tripspend_workspace_mode_v1';
@@ -230,7 +229,7 @@ const BackButtonGuard = () => {
   return null;
 };
 
-const AuthPrompt = ({ onSignIn, onLater }: { onSignIn: () => void; onLater: () => void }) => (
+const AuthPrompt = ({ onSignIn }: { onSignIn: () => void }) => (
   <div className="min-h-screen px-4 py-8 flex items-center justify-center bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
     <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl p-8 text-center border border-white/50 backdrop-blur-sm">
       <div className="w-20 h-20 mx-auto rounded-3xl bg-blue-600 flex items-center justify-center mb-6 shadow-xl shadow-blue-200">
@@ -252,15 +251,6 @@ const AuthPrompt = ({ onSignIn, onLater }: { onSignIn: () => void; onLater: () =
       >
         <img src={googleIcon} alt="" className="w-5 h-5" />
         Sign in with Google
-      </button>
-
-      {/* Later Link */}
-      <button
-        type="button"
-        onClick={onLater}
-        className="text-slate-400 font-medium hover:text-slate-600 transition-colors text-sm"
-      >
-        Later
       </button>
     </div>
   </div>
@@ -285,11 +275,6 @@ export default function App() {
     }
   });
 
-  const [authPromptDismissed, setAuthPromptDismissed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(AUTH_PROMPT_DISMISSED_KEY) === '1';
-    } catch { return false; }
-  });
   const [signingIn, setSigningIn] = useState(false);
   const [isTripSwitching, setIsTripSwitching] = useState(false);
   const [pendingTripName, setPendingTripName] = useState('');
@@ -386,6 +371,12 @@ export default function App() {
       return;
     }
 
+    // Don't decide between cloud/local until the first trips snapshot arrives —
+    // deciding on an empty not-yet-loaded list causes flashes and wrong fallbacks.
+    if (!collaborativeTripStore.tripsLoaded) {
+      return;
+    }
+
     if (!localHasSetup) {
       // New cloud user with no local data — go straight into cloud mode.
       setCollabReady(true);
@@ -402,6 +393,7 @@ export default function App() {
     collaborativeModeRequested,
     collaborativeHasTrips,
     collaborativeTripStore.cloudAccessDenied,
+    collaborativeTripStore.tripsLoaded,
     localHasSetup,
   ]);
 
@@ -426,14 +418,21 @@ export default function App() {
   // isHydrated check: Defer rendering the workspace if the last selected workspace was collaborative,
   // keeping the loading screen visible until auth is done and collaborative trip data is fully loaded.
   const isHydrated = useMemo(() => {
+    const localHydrated = (localTripStore as typeof localTripStore & { isHydrated?: boolean }).isHydrated ?? false;
     if (storedWorkspaceMode === 'collaborative') {
       if (authLoading) return false;
       if (user) {
-        return collabReady;
+        if (collabReady) return true;
+        if (collaborativeTripStore.cloudAccessDenied) return localHydrated;
+        // Wait only for the first cloud snapshot. Once it has arrived and we
+        // still aren't in cloud mode (e.g. local data exists but no cloud
+        // trips), fall back to the local store instead of loading forever.
+        if (!collaborativeTripStore.tripsLoaded) return false;
+        return localHydrated;
       }
     }
-    return (localTripStore as typeof localTripStore & { isHydrated?: boolean }).isHydrated ?? false;
-  }, [storedWorkspaceMode, authLoading, user, collabReady, localTripStore]);
+    return localHydrated;
+  }, [storedWorkspaceMode, authLoading, user, collabReady, collaborativeTripStore.cloudAccessDenied, collaborativeTripStore.tripsLoaded, localTripStore]);
 
   const {
     data,
@@ -733,20 +732,13 @@ export default function App() {
   const isSetup = isHydrated && !!data.setup;
   const shouldShowOnboarding = isHydrated && !isSetup && !onboardingDone;
   const shouldShowNotificationGate = isHydrated && !isSetup && onboardingDone && !notificationGateComplete;
-  const shouldShowPreSetupAuthPrompt = isHydrated && !isSetup && onboardingDone && notificationGateComplete && firebaseConfigured && !authLoading && !user && !authPromptDismissed;
+  const shouldShowPreSetupAuthPrompt = isHydrated && !isSetup && onboardingDone && notificationGateComplete && firebaseConfigured && !authLoading && !user;
   const shouldShowPreSetupChoice = isHydrated && !isSetup && onboardingDone && notificationGateComplete && !!user;
 
   const completeOnboarding = useCallback(() => {
     setOnboardingDone(true);
     try {
       localStorage.setItem(ONBOARDING_KEY, '1');
-    } catch { /* ignore */ }
-  }, []);
-
-  const handleAuthPromptLater = useCallback(() => {
-    setAuthPromptDismissed(true);
-    try {
-      localStorage.setItem(AUTH_PROMPT_DISMISSED_KEY, '1');
     } catch { /* ignore */ }
   }, []);
 
@@ -964,7 +956,7 @@ export default function App() {
           ) : shouldShowNotificationGate ? (
             <Route path="*" element={<NotificationPermissionGate />} />
           ) : shouldShowPreSetupAuthPrompt ? (
-            <Route path="*" element={<AuthPrompt onSignIn={handleGoogleSignIn} onLater={handleAuthPromptLater} />} />
+            <Route path="*" element={<AuthPrompt onSignIn={handleGoogleSignIn} />} />
           ) : shouldShowPreSetupChoice ? (
             <>
               <Route

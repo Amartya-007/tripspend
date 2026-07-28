@@ -13,6 +13,9 @@ interface UseTripSyncInput {
 
 export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripSyncInput) => {
   const [tripDocs, setTripDocs] = useState<Record<string, FirestoreRecord>>({});
+  // True once the trips listener has delivered its first snapshot (or errored).
+  // Distinguishes "still loading cloud trips" from "loaded, and there are none".
+  const [tripsLoaded, setTripsLoaded] = useState(false);
   const [activeTrip, setActiveTrip] = useState<string | null>(() => {
     try {
       return localStorage.getItem(ACTIVE_SHARED_TRIP_KEY);
@@ -29,6 +32,7 @@ export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripS
   useEffect(() => {
     if (!enabled || !userUid || !firestore) {
       setTripDocs({});
+      setTripsLoaded(false);
       activeTripIdsRef.current.clear();
       return;
     }
@@ -68,6 +72,7 @@ export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripS
 
       tripDocsRef.current = nextTripDocs;
       setTripDocs(nextTripDocs);
+      setTripsLoaded(true);
       activeTripIdsRef.current = activeTripIds;
 
       setActiveTrip((prev) => {
@@ -89,6 +94,9 @@ export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripS
     }, (error) => {
       const errCode = (error as { code?: string })?.code || 'unknown';
       console.error(`[TripSpend] Trips listener error (${errCode}):`, error);
+      // The listener will not deliver a snapshot after an error — mark loading
+      // finished so the app can fall back instead of waiting forever.
+      setTripsLoaded(true);
       if (isPermissionDeniedError(error)) {
         console.warn('[TripSpend] Permission denied on trips — setting cloudAccessDenied');
         setCloudAccessDenied(true);
@@ -117,6 +125,7 @@ export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripS
   return {
     tripDocs,
     tripDocsRef,
+    tripsLoaded,
     activeTrip,
     setActiveTripWithPreserve,
     activeTripIds: activeTripIdsRef.current,
