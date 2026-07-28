@@ -969,7 +969,7 @@ export default function App() {
             <>
               <Route
                 path="/setup"
-                element={<SetupScreen onSave={saveSetup} initialData={data.setup} />}
+                element={<SetupScreen onSave={saveSetup} initialData={data.setup} onNameTrip={handleNameCurrentTrip} />}
               />
               <Route
                 path="*"
@@ -992,7 +992,7 @@ export default function App() {
           ) : !isSetup ? (
             <Route
               path="*"
-              element={<SetupScreen onSave={saveSetup} initialData={data.setup} />}
+              element={<SetupScreen onSave={saveSetup} initialData={data.setup} onNameTrip={handleNameCurrentTrip} />}
             />
           ) : (
             <>
@@ -1177,7 +1177,7 @@ export default function App() {
                   />
                 }
               />
-              <Route path="/setup" element={<SetupScreen onSave={saveSetup} initialData={data.setup} />} />
+              <Route path="/setup" element={<SetupScreen onSave={saveSetup} initialData={data.setup} onNameTrip={handleNameCurrentTrip} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}
