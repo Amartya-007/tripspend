@@ -142,29 +142,37 @@ export const useTripMutations = ({
     }
   }, [enabled, userUid, setActiveTripWithPreserve]);
 
-  const importLocalTrips = useCallback(async (localTrips: Trip[], preferredActiveTripId: string | null) => {
-    if (!enabled || !firestore || !userUid) return false;
-    if (!Array.isArray(localTrips) || localTrips.length === 0) return false;
+  const importLocalTrips = useCallback(async (localTrips: Trip[], preferredActiveTripId: string | null): Promise<string | null> => {
+    if (!enabled || !firestore || !userUid) return null;
+    if (!Array.isArray(localTrips) || localTrips.length === 0) return null;
 
     try {
       const existingShared = await getDocs(query(collection(firestore, 'trips'), where('members', 'array-contains', userUid)));
-      const existingBySourceId = new Set<string>();
-      const existingBySignature = new Set<string>();
+      const existingBySourceId = new Map<string, string>();
+      const existingBySignature = new Map<string, string>();
 
       existingShared.docs.forEach((tripDoc) => {
         const payload = tripDoc.data() as FirestoreRecord;
-        if (typeof payload.sourceLocalTripId === 'string') existingBySourceId.add(payload.sourceLocalTripId);
+        if (typeof payload.sourceLocalTripId === 'string') existingBySourceId.set(payload.sourceLocalTripId, tripDoc.id);
         const name = typeof payload.name === 'string' ? payload.name : '';
-        if (name) existingBySignature.add(`${name}::${toIso(payload.createdAt)}`);
+        if (name) existingBySignature.set(`${name}::${toIso(payload.createdAt)}`, tripDoc.id);
       });
 
       const idMap = new Map<string, string>();
+      // Trips already migrated in a previous run still resolve to an id, so a repeat
+      // "Generate Invite Code" tap returns the existing code instead of doing nothing.
+      existingBySourceId.forEach((cloudId, sourceId) => idMap.set(sourceId, cloudId));
+
       let importedCount = 0;
 
       for (let i = 0; i < localTrips.length; i += 1) {
         const localTrip = localTrips[i];
         const signature = `${localTrip.name}::${localTrip.createdAt || ''}`;
-        if (existingBySourceId.has(localTrip.id) || existingBySignature.has(signature)) continue;
+        if (existingBySourceId.has(localTrip.id)) continue;
+        if (existingBySignature.has(signature)) {
+          idMap.set(localTrip.id, existingBySignature.get(signature)!);
+          continue;
+        }
 
         const migratedTripData = migrateLegacyParticipants(localTrip.data);
         const payload = {
@@ -220,16 +228,22 @@ export const useTripMutations = ({
       }
 
       if (preferredActiveTripId && idMap.has(preferredActiveTripId)) {
-        setActiveTripWithPreserve(idMap.get(preferredActiveTripId) || null);
-      } else if (!preferredActiveTripId && importedCount > 0) {
+        const resolvedId = idMap.get(preferredActiveTripId) || null;
+        setActiveTripWithPreserve(resolvedId);
+        return resolvedId;
+      }
+
+      if (!preferredActiveTripId && (importedCount > 0 || idMap.size > 0)) {
         const firstImported = idMap.values().next().value as string | undefined;
         if (firstImported) setActiveTripWithPreserve(firstImported);
+        return firstImported || null;
       }
-      return importedCount > 0;
+
+      return null;
     } catch (error) {
       console.error('Failed to import local trips', error);
       if (isPermissionDeniedError(error)) setCloudAccessDenied(true);
-      return false;
+      return null;
     }
   }, [enabled, userUid, setActiveTripWithPreserve, setCloudAccessDenied]);
 

@@ -464,14 +464,24 @@ export default function App() {
   // Regular create should follow the active store mode.
   const createTrip = tripStore.createTrip;
 
-  // Invite code generation is an explicit cloud action.
+  // Invite code generation is an explicit cloud action. If the user is already on a
+  // shared cloud trip, its doc id *is* the invite code — no new trip needed. Otherwise
+  // this is a local-only trip being shared for the first time, so we migrate its actual
+  // setup + expenses into the cloud trip rather than creating a disconnected empty one.
   const generateInviteCode = useCallback(async () => {
     if (!collaborativeModeRequested) return null;
-    const baseName = getActiveTripName() || 'Shared Trip';
-    const created = await collaborativeTripStore.createTrip(baseName);
+
+    if (usingCollaborativeStore && activeTrip && /^\d{12}$/.test(activeTrip)) {
+      return activeTrip;
+    }
+
+    const currentLocalTrip = localTripsForMigration.find((trip) => trip.id === localActiveTripId);
+    if (!currentLocalTrip) return null;
+
+    const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
     if (typeof created === 'string' && /^\d{12}$/.test(created)) return created;
     return null;
-  }, [collaborativeModeRequested, collaborativeTripStore, getActiveTripName]);
+  }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
 
   const memberRegistryApi = useMemberRegistry({
     setup: data.setup,
