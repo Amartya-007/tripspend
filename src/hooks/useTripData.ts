@@ -299,6 +299,7 @@ export function useTripData() {
         debugLog('[TripData] IndexedDB hydration loaded:', savedTrips?.length || 0);
 
         if (!cancelled && Array.isArray(savedTrips) && savedTrips.length > 0) {
+          let preferIdb = false;
           setTrips(prev => {
             // Only hydrate if IDB has more trips or more recent data than current state
             // This prevents IDB from overwriting freshly-added expenses
@@ -312,6 +313,7 @@ export function useTripData() {
             // Prefer whichever has more data, or if equal prefer more recent
             if (idbTotal > currentTotal || (idbTotal === currentTotal && idbUpdated > currentUpdated)) {
               debugLog('[TripData] Preferring IDB data over current');
+              preferIdb = true;
               return savedTrips.map((trip) => ({
                 ...trip,
                 updatedAt: trip.updatedAt || trip.createdAt || nowIso(),
@@ -321,10 +323,17 @@ export function useTripData() {
             debugLog('[TripData] Keeping current trips');
             return prev;
           });
-          setActiveTrip((prev) => {
-            if (prev && savedTrips.some((trip) => trip.id === prev)) return prev;
-            return savedTrips[0].id;
-          });
+          // Only re-derive the active trip from the IDB snapshot when we actually
+          // adopted it above. Otherwise this async read (which may resolve well
+          // after mount) can carry a stale snapshot that predates a trip the user
+          // has since created — falling back to savedTrips[0] would silently
+          // switch the active trip back to an old one.
+          if (preferIdb) {
+            setActiveTrip((prev) => {
+              if (prev && savedTrips.some((trip) => trip.id === prev)) return prev;
+              return savedTrips[0].id;
+            });
+          }
         }
 
         if (!cancelled && Array.isArray(savedPresets)) {
