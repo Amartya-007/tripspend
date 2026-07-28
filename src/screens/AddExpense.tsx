@@ -14,7 +14,11 @@ import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 
-import { fileToDataUrl } from '../utils/fileUtils.ts';
+import { blobToDataUrl, fileToDataUrl } from '../utils/fileUtils.ts';
+
+const debugLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.debug(...args);
+};
 
 const QUICK_AMOUNTS = [50, 100, 200, 500];
 
@@ -58,16 +62,7 @@ const canvasToDataUrl = (canvas: HTMLCanvasElement, type: string, quality: numbe
         reject(new Error('Image compression failed'));
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-        } else {
-          reject(new Error('Image read failed'));
-        }
-      };
-      reader.onerror = () => reject(new Error('Image read failed'));
-      reader.readAsDataURL(blob);
+      void blobToDataUrl(blob).then(resolve).catch(reject);
     }, type, quality);
   });
 };
@@ -492,13 +487,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
   }, []);
 
   const saveExpense = useCallback(async (expenseToSave: Expense) => {
-    console.log('[AddExpense] saveExpense START:', { 
-      id: expenseToSave.id, 
-      isEditing,
-      hasOnAdd: !!onAdd,
-      hasOnUpdate: !!onUpdate,
-      isSubmittingRef: isSubmittingRef.current,
-    });
+    debugLog('[AddExpense] saveExpense started');
 
     if (isSubmittingRef.current) {
       console.warn('[AddExpense] saveExpense: already submitting, early exit');
@@ -515,10 +504,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       }
 
       const savePromise = isEditing ? onUpdate(expenseToSave) : onAdd(expenseToSave);
-      console.log('[AddExpense] saveExpense: callback returned, is promise?', savePromise instanceof Promise);
-
       if (savePromise instanceof Promise) {
-        console.log('[AddExpense] awaiting Promise with 5s timeout');
         await Promise.race([
           savePromise,
           new Promise<void>((_, reject) => {
@@ -530,7 +516,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
         ]);
       }
 
-      console.log('[AddExpense] Save completed successfully, navigating to /expenses');
       navigate('/expenses');
     } catch (saveError) {
       console.error('[AddExpense] Unexpected save error:', saveError);
@@ -543,8 +528,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[AddExpense] handleSubmit: form submitted, checking state', { isSaving, isSubmittingRef: isSubmittingRef.current, isLocked });
-    
     if (isSaving || isSubmittingRef.current) {
       console.warn('[AddExpense] handleSubmit: early exit - already submitting or saving');
       return;
@@ -556,8 +539,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     }
 
     setError('');
-    console.log('[AddExpense] handleSubmit called', { amount, date, paidBy, participantCount: splitWith.length, isEditing, hasOnAdd: !!onAdd, hasOnUpdate: !!onUpdate });
-    
     if (!amount || isNaN(parseFloat(amount))) {
       const err = 'Please enter a valid amount.';
       console.error('[AddExpense] Validation error:', err);
@@ -606,13 +587,6 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       ...(!isEditing && { createdAt: new Date().toISOString() }),
     };
     
-    console.log('[AddExpense] Expense data prepared:', { 
-      id: expenseData.id, 
-      amount: expenseData.amount, 
-      participants: expenseData.participants?.length ?? 0,
-      paidBy: expenseData.paidBy 
-    });
-
     if (!isEditing) {
       const dup = findDuplicate(expenses, amountNum, paidBy, date, id);
       if (dup) {
@@ -716,7 +690,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
       // Lazy load tesseract — only pulled when actually needed (~300KB saved from initial bundle)
       const { recognize } = await import('tesseract.js');
       const { data } = await recognize(receipts[0].image, 'eng');
-      const extracted = extractReceiptFields(data.text || '');
+      const extracted = extractReceiptFields((data.text || '').slice(0, 12000));
 
       if (extracted.amount && (!amount || parseFloat(amount) <= 0)) updateAmount(extracted.amount.toString());
       if (extracted.date) {

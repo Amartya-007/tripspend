@@ -216,26 +216,18 @@ export const syncTripIncremental = async (uid: string, localTrip: Trip): Promise
       (a, b) => toMillis(b.updatedAt || b.createdAt) - toMillis(a.updatedAt || a.createdAt)
     );
   } catch (error) {
-    // Compatibility fallback: if incremental subcollection sync cannot run (e.g., rules not updated),
-    // write full data into trip document so sync still succeeds.
-    await setDoc(
-      tripRef,
-      {
-        name: mergedTrip.name,
-        setup: sanitizeForFirestore(mergedTrip.data.setup),
-        data: sanitizeForFirestore(mergedTrip.data),
-        createdAt: mergedTrip.createdAt,
-        updatedAtIso: mergedTrip.updatedAt || mergedTrip.createdAt,
-        updatedAt: serverTimestamp(),
-        schemaVersion: 3,
-        syncFallback: true,
-      },
-      { merge: true }
-    );
-    pushedExpenses = mergedTrip.data.expenses.length;
-    pulledExpenses = 0;
-    deletedRemoteExpenses = 0;
-    console.warn('Incremental sync fallback to trip document payload', error);
+    const message = error instanceof Error ? error.message : 'Unknown incremental sync error';
+    console.error('Incremental sync failed without falling back to embedded trip payload:', message);
+
+    return {
+      mergedTrip,
+      pushedExpenses,
+      pulledExpenses,
+      deletedRemoteExpenses,
+      lastAttemptAt: attemptAt,
+      success: false,
+      error: message,
+    };
   }
 
   return {
@@ -383,12 +375,14 @@ export const deleteTripFromCloud = async (uid: string, tripId: string): Promise<
   const ref = tripDocRef(uid, tripId);
 
   const expensesSnap = await getDocs(expensesColRef(uid, tripId));
-  const batch = writeBatch(db);
-
-  for (const expenseDoc of expensesSnap.docs) {
-    batch.delete(expenseDoc.ref);
+  const expenseDocs = expensesSnap.docs;
+  for (let start = 0; start < expenseDocs.length; start += 450) {
+    const batch = writeBatch(db);
+    for (const expenseDoc of expenseDocs.slice(start, start + 450)) {
+      batch.delete(expenseDoc.ref);
+    }
+    await batch.commit();
   }
-  batch.delete(ref);
 
-  await batch.commit();
+  await deleteDoc(ref);
 };

@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { collection, doc, writeBatch, serverTimestamp, runTransaction, getDoc, getDocs, updateDoc, query, where, arrayUnion, DocumentReference } from 'firebase/firestore';
+import { collection, deleteDoc, doc, writeBatch, serverTimestamp, runTransaction, getDoc, getDocs, updateDoc, query, where, arrayUnion, DocumentReference } from 'firebase/firestore';
 import { firestore } from '../../lib/firebase';
 import { Trip, TripSetup } from '../../utils/calculations';
-import { FirestoreRecord, isPermissionDeniedError, nowIso, toIso, generateShortCode } from './utils';
+import { FirestoreRecord, inviteExpiry, isPermissionDeniedError, nowIso, toIso, generateShortCode } from './utils';
 import { migrateLegacyParticipants } from '../../utils/migration';
 import { claimMemberIdentity as claimMemberIdentityCore } from '../../utils/memberManagementCore';
 
@@ -61,6 +61,8 @@ export const useTripMutations = ({
               setup,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
+              inviteActive: true,
+              inviteExpiresAt: inviteExpiry(),
             });
           });
           tripRef = candidateRef;
@@ -82,6 +84,8 @@ export const useTripMutations = ({
           setup,
           createdAt: now,
           updatedAt: now,
+          inviteActive: true,
+          inviteExpiresAt: inviteExpiry().toISOString(),
         },
       }));
       setActiveTripWithPreserve(tripRef.id);
@@ -111,6 +115,8 @@ export const useTripMutations = ({
               setup: initialSetup || null,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
+              inviteActive: true,
+              inviteExpiresAt: inviteExpiry(),
             });
           });
           tripRef = candidateRef;
@@ -120,7 +126,7 @@ export const useTripMutations = ({
         }
       }
 
-      if (!tripRef) throw new Error('Failed to generate a unique 6-digit invite code');
+      if (!tripRef) throw new Error('Failed to generate a unique 12-digit invite code');
       
       const verifySnap = await getDoc(tripRef);
       if (!verifySnap.exists()) {
@@ -169,6 +175,8 @@ export const useTripMutations = ({
           setup: migratedTripData.setup || null,
           createdAt: localTrip.createdAt || nowIso(),
           updatedAt: localTrip.updatedAt || localTrip.createdAt || nowIso(),
+          inviteActive: true,
+          inviteExpiresAt: inviteExpiry(),
         };
 
         let tripRef: DocumentReference | null = null;
@@ -228,13 +236,10 @@ export const useTripMutations = ({
   const joinTrip = useCallback(async (tripId: string) => {
     if (!enabled || !firestore || !userUid) return false;
     const cleaned = tripId.trim();
-    if (!/^\d{6}$/.test(cleaned)) return false;
+    if (!/^\d{12}$/.test(cleaned)) return false;
 
     try {
       const tripRef = doc(firestore, 'trips', cleaned);
-      const tripSnap = await getDoc(tripRef);
-      if (!tripSnap.exists()) return false;
-
       await updateDoc(tripRef, {
         members: arrayUnion(userUid),
         updatedAt: serverTimestamp(),
@@ -276,10 +281,12 @@ export const useTripMutations = ({
     try {
       const expensesRef = collection(firestore, 'trips', tripId, 'expenses');
       const snap = await getDocs(expensesRef);
-      const batch = writeBatch(firestore);
-      snap.docs.forEach((expenseDoc) => batch.delete(expenseDoc.ref));
-      batch.delete(doc(firestore, 'trips', tripId));
-      await batch.commit();
+      for (let start = 0; start < snap.docs.length; start += 450) {
+        const batch = writeBatch(firestore);
+        snap.docs.slice(start, start + 450).forEach((expenseDoc) => batch.delete(expenseDoc.ref));
+        await batch.commit();
+      }
+      await deleteDoc(doc(firestore, 'trips', tripId));
       
       if (activeTrip === tripId) {
         setActiveTripWithPreserve(null);

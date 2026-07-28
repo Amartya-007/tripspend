@@ -1,3 +1,5 @@
+import { auth } from '../lib/firebase';
+
 type AIResult = { category: string; confidence: number; reasoning: string };
 
 export const categorizeExpenseWithAI = async (
@@ -9,11 +11,18 @@ export const categorizeExpenseWithAI = async (
     return null;
   }
 
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    return null;
+  }
+
   try {
+    const idToken = await currentUser.getIdToken();
     const response = await fetch('/api/categorize-expense', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
       },
       body: JSON.stringify({
         ocrText: ocrText.slice(0, 4000),
@@ -41,4 +50,4 @@ export const categorizeExpenseWithAI = async (
   }
 };
 
-export const isAIConfigured = (): boolean => true;
+export const isAIConfigured = (): boolean => auth?.currentUser != null;

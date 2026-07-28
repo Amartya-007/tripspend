@@ -5,6 +5,7 @@ export type MemberOp =
   | { type: 'restore'; memberId: string; timestamp: string };
 
 const queueKey = (tripId: string) => `tripspend_member_queue_${tripId}`;
+const MAX_QUEUE_ITEMS = 500;
 
 const readQueue = (tripId: string): MemberOp[] => {
   try {
@@ -22,7 +23,7 @@ const saveQueue = (tripId: string, ops: MemberOp[]) => {
 };
 
 export const enqueueOp = (tripId: string, op: MemberOp): void => {
-  const next = [...readQueue(tripId), op];
+  const next = [...readQueue(tripId), op].slice(-MAX_QUEUE_ITEMS);
   saveQueue(tripId, next);
 };
 

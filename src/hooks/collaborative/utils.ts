@@ -5,6 +5,9 @@ export type FirestoreRecord = Record<string, unknown>;
 export const ACTIVE_SHARED_TRIP_KEY = 'tripspend_active_shared_trip';
 export const PRESETS_KEY = 'tripspend_presets';
 export const ACTIVE_TRIP_PRESERVE_MS = 6000;
+export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const inviteExpiry = () => new Date(Date.now() + INVITE_TTL_MS);
 
 export const isPermissionDeniedError = (error: unknown) => {
   const code = (error as { code?: string })?.code;
@@ -45,13 +48,13 @@ export const toIso = (value: unknown): string => {
 export const generateShortCode = (): string => {
   let result = '';
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const values = new Uint8Array(6);
+    const values = new Uint8Array(12);
     crypto.getRandomValues(values);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       result += String(values[i] % 10);
     }
   } else {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       result += Math.floor(Math.random() * 10).toString();
     }
   }

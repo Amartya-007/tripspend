@@ -26,6 +26,7 @@ import { PreSetupTripChoice } from './components/PreSetupTripChoice';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { NotificationRoute, useSmartReminders } from './hooks/useSmartReminders';
 import { saveTripToCloud, loadAllTripsFromCloud, syncTripIncremental } from './services/cloudTrip';
+import { clearAccountScopedStorage } from './utils/privacy';
 import { buildDisplayNameMap } from './utils/memberDisplay';
 
 const EXIT_PATHS = new Set(['/', '/setup']);
@@ -96,7 +97,7 @@ const DeepLinkHandler = () => {
         const joinTripId = parsed.searchParams.get('joinTripId');
         if (joinTripId) {
           const cleaned = joinTripId.trim();
-          if (/^\d{6}$/.test(cleaned)) {
+          if (/^\d{12}$/.test(cleaned)) {
             navigate(`/?joinTripId=${encodeURIComponent(cleaned)}`);
             return;
           }
@@ -149,7 +150,7 @@ const JoinTripQueryHandler = ({
     if (!joinTripId) return;
 
     const cleaned = joinTripId.trim();
-    if (/^\d{6}$/.test(cleaned)) {
+    if (/^\d{12}$/.test(cleaned)) {
       onJoinTripId(cleaned);
     }
 
@@ -468,7 +469,7 @@ export default function App() {
     if (!collaborativeModeRequested) return null;
     const baseName = getActiveTripName() || 'Shared Trip';
     const created = await collaborativeTripStore.createTrip(baseName);
-    if (typeof created === 'string' && /^\d{6}$/.test(created)) return created;
+    if (typeof created === 'string' && /^\d{12}$/.test(created)) return created;
     return null;
   }, [collaborativeModeRequested, collaborativeTripStore, getActiveTripName]);
 
@@ -625,6 +626,7 @@ export default function App() {
   const handleGoogleSignOut = useCallback(async () => {
     try {
       await unregisterDeviceToken();
+      clearAccountScopedStorage();
       await logout();
     } catch (error) {
       console.error('Sign-out failed', error);

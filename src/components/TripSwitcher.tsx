@@ -46,8 +46,8 @@ export function TripSwitcher({
   );
   const activeTripId = useMemo(() => activeTrip || null, [activeTrip]);
   const effectiveInviteCode = useMemo(() => {
-    if (generatedInviteCode && /^\d{6}$/.test(generatedInviteCode)) return generatedInviteCode;
-    if (activeTripId && /^\d{6}$/.test(activeTripId)) return activeTripId;
+    if (generatedInviteCode && /^\d{12}$/.test(generatedInviteCode)) return generatedInviteCode;
+    if (activeTripId && /^\d{12}$/.test(activeTripId)) return activeTripId;
     return null;
   }, [activeTripId, generatedInviteCode]);
   const canShareInviteCode = Boolean(effectiveInviteCode);
@@ -59,7 +59,7 @@ export function TripSwitcher({
 Invite Code:
 ${effectiveInviteCode}
 
-Open TripSpend app → Settings → My Trips → Join and enter this 6-digit code.`;
+Open TripSpend app → Settings → My Trips → Join and enter this 12-digit code.`;
   }, [activeTripName, effectiveInviteCode]);
 
   const newTripTrimmed = useMemo(() => newTripName.trim(), [newTripName]);
@@ -108,13 +108,13 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
     setGeneratingInviteCode(true);
     try {
       const createdId = onGenerateInviteCode ? await onGenerateInviteCode() : null;
-      if (createdId && /^\d{6}$/.test(createdId)) {
+      if (createdId && /^\d{12}$/.test(createdId)) {
         setGeneratedInviteCode(createdId);
         return;
       }
-      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
+      push({ title: 'Invite unavailable', message: 'Could not generate a 12-digit cloud invite code.', variant: 'error' });
     } catch {
-      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
+      push({ title: 'Invite unavailable', message: 'Could not generate a 12-digit cloud invite code.', variant: 'error' });
     } finally {
       setGeneratingInviteCode(false);
     }
@@ -124,8 +124,8 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
     if (!onJoinTrip || joining) return;
     const id = joinTripId.trim();
     if (!id) return;
-    if (!/^\d{6}$/.test(id)) {
-      push({ title: 'Invalid code', message: 'Enter a 6-digit invite code.', variant: 'error' });
+    if (!/^\d{12}$/.test(id)) {
+      push({ title: 'Invalid code', message: 'Enter a 12-digit invite code.', variant: 'error' });
       return;
     }
     setJoining(true);
@@ -136,7 +136,7 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
         closeMenu();
         push({ title: 'Joined trip', message: 'You\'ve joined the shared trip.', variant: 'success' });
       } else {
-        push({ title: 'Trip not found', message: 'Check the 6-digit invite code and try again.', variant: 'error' });
+        push({ title: 'Trip not found', message: 'Check the 12-digit invite code and try again.', variant: 'error' });
       }
     } finally {
       setJoining(false);
@@ -145,7 +145,7 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
 
   const handleCopyId = useCallback(async () => {
     if (!effectiveInviteCode) {
-      push({ title: 'Invite unavailable', message: 'This trip does not have a 6-digit invite code yet.', variant: 'warning' });
+      push({ title: 'Invite unavailable', message: 'This trip does not have a 12-digit invite code yet.', variant: 'warning' });
       return;
     }
     try {
@@ -158,7 +158,7 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
 
   const handleShare = useCallback(async () => {
     if (!inviteMessage || !canShareInviteCode) {
-      push({ title: 'Invite unavailable', message: 'This trip does not have a 6-digit invite code yet.', variant: 'warning' });
+      push({ title: 'Invite unavailable', message: 'This trip does not have a 12-digit invite code yet.', variant: 'warning' });
       return;
     }
     if (navigator.share) {
@@ -315,8 +315,8 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
                     <p className="text-sm font-bold text-slate-900">Invite to "{activeTripName}"</p>
                     <p className="text-xs text-slate-500 mt-1">
                       {canShareInviteCode
-                        ? 'Friends can join using your 6-digit invite code.'
-                        : 'This trip is local-only. Switch to a shared 6-digit trip code to invite others.'}
+                        ? 'Friends can join using your 12-digit invite code.'
+                        : 'This trip is local-only. Switch to a shared 12-digit trip code to invite others.'}
                     </p>
                   </div>
 
@@ -379,7 +379,7 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
                       <Link className="w-6 h-6 text-emerald-600" />
                     </div>
                     <p className="text-sm font-bold text-slate-900">Join a shared trip</p>
-                    <p className="text-xs text-slate-500 mt-1">Enter the 6-digit invite code you received from a friend.</p>
+                    <p className="text-xs text-slate-500 mt-1">Enter the 12-digit invite code you received from a friend.</p>
                   </div>
                   <input
                     type="text"

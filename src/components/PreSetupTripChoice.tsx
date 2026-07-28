@@ -75,7 +75,7 @@ export const PreSetupTripChoice: React.FC<PreSetupTripChoiceProps> = ({
           <input
             value={joinTripId}
             onChange={(event) => setJoinTripId(event.target.value)}
-            placeholder="Enter 6-digit invite code"
+            placeholder="Enter 12-digit invite code"
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
           />
 
@@ -91,7 +91,7 @@ export const PreSetupTripChoice: React.FC<PreSetupTripChoiceProps> = ({
           </button>
 
           <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
-            Ask your friend for the 6-digit invite code and enter it here.
+            Ask your friend for the 12-digit invite code and enter it here.
           </p>
         </div>
       </motion.div>

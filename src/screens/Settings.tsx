@@ -10,6 +10,7 @@ import { Expense, TripData, TripSetup, Trip, calculateSettlement, getTripPeople 
 import { TripSwitcher } from '../components/TripSwitcher';
 import { AccountSwitchDialog } from '../components/AccountSwitchDialog';
 import { formatCurrency } from '../utils/cn';
+import { MAX_FILE_SIZE_BYTES } from '../utils/fileUtils';
 
 interface SettingsProps {
   onReset: () => void;
@@ -51,6 +52,10 @@ interface SettingsProps {
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
+    if (blob.size > MAX_FILE_SIZE_BYTES) {
+      reject(new Error('File size exceeds the 10MB maximum limit.'));
+      return;
+    }
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Failed to read image.'));
     reader.onloadend = () => {

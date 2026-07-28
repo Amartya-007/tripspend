@@ -34,6 +34,7 @@
     "date-fns": "^4.1.0",
     "express": "^5.2.1",
     "firebase": "^12.11.0",
+    "firebase-admin": "^14.2.0",
     "jspdf": "^3.0.2",
     "lucide-react": "^0.546.0",
     "lz-string": "^1.5.0",

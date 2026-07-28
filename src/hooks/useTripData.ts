@@ -4,6 +4,10 @@ import { TripData, TripSetup, Expense, Trip } from '../utils/calculations.ts';
 import { indexedGet, indexedSet } from '../utils/indexedStorage';
 import { migrateLegacyParticipants } from '../utils/migration.ts';
 
+const debugLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.debug(...args);
+};
+
 const STORAGE_KEY = 'tripspend_data';
 const TRIPS_STORAGE_KEY = 'tripspend_trips';
 const ACTIVE_TRIP_KEY = 'tripspend_active_trip';
@@ -223,7 +227,7 @@ export function useTripData() {
   // Persist trips to localStorage
   useEffect(() => {
     try {
-      console.log('[TripData] Persisting to localStorage:', trips.map(t => ({ id: t.id, name: t.name })));
+      debugLog('[TripData] Persisting trip count:', trips.length);
       writeStoredObject(TRIPS_STORAGE_KEY, trips);
     } catch (error) {
       try {
@@ -286,13 +290,13 @@ export function useTripData() {
 
     const hydrateFromIndexedDb = async () => {
       try {
-        console.log('[TripData] Starting IndexedDB hydration...');
+        debugLog('[TripData] Starting IndexedDB hydration');
         const [savedTrips, savedPresets] = await Promise.all([
           indexedGet<Trip[]>(TRIPS_IDB_KEY),
           indexedGet<QuickAddPreset[]>(PRESETS_IDB_KEY),
         ]);
 
-        console.log('[TripData] IndexedDB hydration loaded:', savedTrips?.map(t => ({ id: t.id, name: t.name })) || 'none');
+        debugLog('[TripData] IndexedDB hydration loaded:', savedTrips?.length || 0);
 
         if (!cancelled && Array.isArray(savedTrips) && savedTrips.length > 0) {
           setTrips(prev => {
@@ -303,18 +307,18 @@ export function useTripData() {
             const idbUpdated = Math.max(...savedTrips.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()));
             const currentUpdated = Math.max(...prev.map(t => new Date(t.updatedAt || t.createdAt || 0).getTime()), 0);
 
-            console.log('[TripData] Hydration decision:', { idbTotal, currentTotal, idbUpdated, currentUpdated, current: prev.map(t => t.id) });
+            debugLog('[TripData] Hydration decision:', { idbTotal, currentTotal, idbUpdated, currentUpdated });
 
             // Prefer whichever has more data, or if equal prefer more recent
             if (idbTotal > currentTotal || (idbTotal === currentTotal && idbUpdated > currentUpdated)) {
-              console.log('[TripData] Preferring IDB data over current');
+              debugLog('[TripData] Preferring IDB data over current');
               return savedTrips.map((trip) => ({
                 ...trip,
                 updatedAt: trip.updatedAt || trip.createdAt || nowIso(),
                 data: normalizeData(trip.data),
               }));
             }
-            console.log('[TripData] Keeping current trips (not overwriting with IDB)');
+            debugLog('[TripData] Keeping current trips');
             return prev;
           });
           setActiveTrip((prev) => {
@@ -536,14 +540,12 @@ export function useTripData() {
         deletedExpenseMap: {},
       },
     };
-    console.log('[TripData] Creating new trip:', { id: newTrip.id, name, hasSetup: Boolean(initialSetup) });
+    debugLog('[TripData] Creating new trip');
     setTrips(prev => {
       const updated = [...prev, newTrip];
-      console.log('[TripData] Trips after create:', updated.map(t => ({ id: t.id, name: t.name })));
       return updated;
     });
     setActiveTrip(newTrip.id);
-    console.log('[TripData] Active trip set to:', newTrip.id);
     return newTrip.id;
   }, []);
 
@@ -626,7 +628,7 @@ export function useTripData() {
     void indexedSet(TRIPS_IDB_KEY, trips).catch((error) => {
       console.error('Failed to persist full trips in IndexedDB', error);
     }).then(() => {
-      console.log('[TripData] Persisted to IndexedDB:', trips.map(t => ({ id: t.id, name: t.name })));
+      debugLog('[TripData] Persisted trips to IndexedDB:', trips.length);
     });
   }, [trips]);
 

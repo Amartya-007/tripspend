@@ -1,8 +1,12 @@
 export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit
 
 export const fileToDataUrl = (file: File): Promise<string> => {
+  return blobToDataUrl(file);
+};
+
+export const blobToDataUrl = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
-    if (file.size > MAX_FILE_SIZE_BYTES) {
+    if (blob.size > MAX_FILE_SIZE_BYTES) {
       reject(new Error('File size exceeds the 10MB maximum limit.'));
       return;
     }
@@ -15,6 +19,6 @@ export const fileToDataUrl = (file: File): Promise<string> => {
       }
     };
     reader.onerror = () => reject(new Error('File read failed'));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 };
