@@ -483,6 +483,19 @@ export default function App() {
     return null;
   }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
 
+  // Only the trip's creator may revoke/reactivate its invite code — enforced again
+  // server-side by onlyCreatorInviteControl().
+  const isActiveTripCreator = usingCollaborativeStore
+    ? Boolean(user?.uid) && collaborativeTripStore.tripCreatorUid === user?.uid
+    : true;
+  const activeTripInviteActive = usingCollaborativeStore
+    ? trips.find((trip) => trip.id === activeTrip)?.inviteActive ?? true
+    : true;
+  const handleToggleInviteActive = useCallback(async (active: boolean) => {
+    if (!usingCollaborativeStore || !activeTrip) return false;
+    return collaborativeTripStore.setInviteActive(activeTrip, active);
+  }, [usingCollaborativeStore, activeTrip, collaborativeTripStore]);
+
   const memberRegistryApi = useMemberRegistry({
     setup: data.setup,
     saveSetup,
@@ -491,6 +504,7 @@ export default function App() {
     tripCreatorUid: usingCollaborativeStore ? collaborativeTripStore.tripCreatorUid : user?.uid || null,
     identityMap: usingCollaborativeStore ? collaborativeTripStore.identityMap : {},
     tripId: activeTrip,
+    removeMemberUid: usingCollaborativeStore ? collaborativeTripStore.removeMemberUid : undefined,
   });
   const displayNames = useMemo(() => buildDisplayNameMap(memberRegistryApi.registry, true), [memberRegistryApi.registry]);
 
@@ -1007,6 +1021,9 @@ export default function App() {
                     userUid={user?.uid || null}
                     myMemberId={collaborativeTripStore.myMemberId}
                     identityMap={collaborativeTripStore.identityMap}
+                    isTripCreator={isActiveTripCreator}
+                    inviteActive={activeTripInviteActive}
+                    onToggleInviteActive={handleToggleInviteActive}
                   />
                 }
               />
@@ -1154,6 +1171,9 @@ export default function App() {
                     onSelectTrip={handleTripSelect}
                     onDeleteTrip={deleteTrip}
                     onRenameTrip={renameTrip}
+                    isTripCreator={isActiveTripCreator}
+                    inviteActive={activeTripInviteActive}
+                    onToggleInviteActive={handleToggleInviteActive}
                   />
                 }
               />

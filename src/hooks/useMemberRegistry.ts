@@ -22,6 +22,7 @@ interface UseMemberRegistryInput {
   tripCreatorUid: string | null;
   identityMap: Record<string, string>;
   tripId?: string | null;
+  removeMemberUid?: (tripId: string, memberUid: string) => Promise<boolean>;
 }
 
 interface UseMemberRegistryOutput {
@@ -49,6 +50,7 @@ export function useMemberRegistry({
   tripCreatorUid,
   identityMap,
   tripId = null,
+  removeMemberUid,
 }: UseMemberRegistryInput): UseMemberRegistryOutput {
   const registry = useMemo(() => setup?.memberRegistry ?? {}, [setup?.memberRegistry]);
   const members = useMemo(() => Object.values(registry).sort((left, right) => left.joinedAt.localeCompare(right.joinedAt)), [registry]);
@@ -140,7 +142,18 @@ export function useMemberRegistry({
       memberId,
       timestamp: leftAt,
     });
-  }, [applyRegistryChange, canRemove, registry, setup]);
+
+    // The registry change above only affects display/settlement state. If this
+    // member had actually joined the cloud trip (has a uid mapped to them) and
+    // the caller is the trip creator, also revoke their real Firestore access —
+    // otherwise a "removed" member keeps full read/write access to the trip.
+    if (isCollaborative && tripId && removeMemberUid && userUid && tripCreatorUid === userUid) {
+      const memberUid = Object.entries(identityMap).find(([, mappedId]) => mappedId === memberId)?.[0];
+      if (memberUid && memberUid !== userUid) {
+        await removeMemberUid(tripId, memberUid);
+      }
+    }
+  }, [applyRegistryChange, canRemove, registry, setup, isCollaborative, tripId, removeMemberUid, userUid, tripCreatorUid, identityMap]);
 
   const restoreMember = useCallback(async (memberId: string) => {
     if (!setup) return;

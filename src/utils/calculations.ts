@@ -69,6 +69,8 @@ export interface Trip {
   createdAt: string; // ISO timestamp
   updatedAt?: string; // ISO timestamp
   data: TripData;
+  /** Whether this trip's invite code currently accepts new joins (cloud trips only). */
+  inviteActive?: boolean;
 }
 
 export interface TripsContainer {

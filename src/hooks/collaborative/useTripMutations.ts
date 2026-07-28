@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { collection, deleteDoc, doc, writeBatch, serverTimestamp, runTransaction, getDoc, getDocs, updateDoc, query, where, arrayUnion, DocumentReference } from 'firebase/firestore';
+import { collection, deleteDoc, doc, writeBatch, serverTimestamp, runTransaction, getDoc, getDocs, updateDoc, query, where, arrayUnion, arrayRemove, deleteField, DocumentReference } from 'firebase/firestore';
 import { firestore } from '../../lib/firebase';
 import { Trip, TripSetup } from '../../utils/calculations';
 import { FirestoreRecord, inviteExpiry, isPermissionDeniedError, nowIso, toIso, generateShortCode } from './utils';
@@ -322,5 +322,52 @@ export const useTripMutations = ({
     }
   }, [enabled]);
 
-  return { saveSetup, createTrip, importLocalTrips, joinTrip, claimMemberIdentity, deleteTrip, renameTrip };
+  // Creator-only: turn the invite code on/off. Turning it back on issues a fresh
+  // expiry window. Existing members are unaffected either way.
+  const setInviteActive = useCallback(async (tripId: string, active: boolean) => {
+    if (!enabled || !firestore) return false;
+    try {
+      await updateDoc(doc(firestore, 'trips', tripId), {
+        inviteActive: active,
+        ...(active ? { inviteExpiresAt: inviteExpiry() } : {}),
+        updatedAt: serverTimestamp(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update invite status', error);
+      if (isPermissionDeniedError(error)) setCloudAccessDenied(true);
+      return false;
+    }
+  }, [enabled, setCloudAccessDenied]);
+
+  // Creator-only: actually revoke a member's Firestore access, not just their
+  // display-registry entry. Enforced server-side by onlyCreatorRemoveMember().
+  const removeMemberUid = useCallback(async (tripId: string, memberUid: string) => {
+    if (!enabled || !firestore || !userUid) return false;
+    if (memberUid === userUid) return false;
+    try {
+      await updateDoc(doc(firestore, 'trips', tripId), {
+        members: arrayRemove(memberUid),
+        [`identityMap.${memberUid}`]: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to remove member access', error);
+      if (isPermissionDeniedError(error)) setCloudAccessDenied(true);
+      return false;
+    }
+  }, [enabled, userUid, setCloudAccessDenied]);
+
+  return {
+    saveSetup,
+    createTrip,
+    importLocalTrips,
+    joinTrip,
+    claimMemberIdentity,
+    deleteTrip,
+    renameTrip,
+    setInviteActive,
+    removeMemberUid,
+  };
 };

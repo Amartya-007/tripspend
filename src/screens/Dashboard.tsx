@@ -43,6 +43,9 @@ interface DashboardProps {
   userUid?: string | null;
   myMemberId?: string | null;
   identityMap?: Record<string, string>;
+  isTripCreator?: boolean;
+  inviteActive?: boolean;
+  onToggleInviteActive?: (active: boolean) => Promise<boolean>;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -57,6 +60,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   activeTrip = null,
   notify,
   isCollaborative,
+  isTripCreator,
+  inviteActive,
+  onToggleInviteActive,
 }) => {
   const stats = useMemo(() => calculateStats(data), [data]);
   const todayDate = useMemo(() => startOfDay(new Date()), []);
@@ -109,6 +115,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             onDeleteTrip={onDeleteTrip}
             onRenameTrip={onRenameTrip}
             notify={notify}
+            isTripCreator={isTripCreator}
+            inviteActive={inviteActive}
+            onToggleInviteActive={onToggleInviteActive}
           />
         </div>
       )}

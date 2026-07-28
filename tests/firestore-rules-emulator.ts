@@ -149,6 +149,62 @@ async function run() {
     updatedAt: '2026-04-10T00:04:00.000Z',
   }));
 
+  // ── New: create must pin members to exactly [caller] ──────────────────────
+  await assertFails(setDoc(doc(senderDb, 'trips/trip-extra-member'), {
+    createdBy: 'uid-a',
+    members: ['uid-a', 'uid-b'],
+    setup: null,
+  }));
+  await assertSucceeds(setDoc(doc(senderDb, 'trips/trip-solo-create'), {
+    createdBy: 'uid-a',
+    members: ['uid-a'],
+    setup: null,
+  }));
+
+  // ── New: creator-only invite revoke/reactivate ─────────────────────────────
+  // Non-creator cannot flip inviteActive.
+  await assertFails(updateDoc(doc(senderDb, `trips/${tripId}`), {
+    inviteActive: false,
+    updatedAt: '2026-04-10T00:05:00.000Z',
+  }));
+  // Creator can revoke (only inviteActive/updatedAt change).
+  await assertSucceeds(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    inviteActive: false,
+    updatedAt: '2026-04-10T00:06:00.000Z',
+  }));
+  // Creator can reactivate with a fresh expiry.
+  await assertSucceeds(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    inviteActive: true,
+    inviteExpiresAt: new Date('2026-05-01T00:00:00.000Z'),
+    updatedAt: '2026-04-10T00:07:00.000Z',
+  }));
+  // The invite-control path cannot smuggle in other field changes.
+  await assertFails(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    inviteActive: false,
+    name: 'Renamed via invite control',
+    updatedAt: '2026-04-10T00:08:00.000Z',
+  }));
+
+  // ── New: creator-only member removal actually revokes access ───────────────
+  // Non-creator cannot remove another member.
+  await assertFails(updateDoc(doc(senderDb, `trips/${tripId}`), {
+    members: ['uid-creator', 'uid-b'],
+    updatedAt: '2026-04-10T00:09:00.000Z',
+  }));
+  // Creator can remove exactly one member and clear their identity-map entry.
+  await assertSucceeds(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    members: ['uid-creator', 'uid-b'],
+    identityMap: { 'uid-b': 'member-b' },
+    updatedAt: '2026-04-10T00:10:00.000Z',
+  }));
+  // Removed member has lost access.
+  await assertFails(getDoc(doc(senderDb, `trips/${tripId}`)));
+  // Creator cannot remove themself through this path.
+  await assertFails(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    members: ['uid-b'],
+    updatedAt: '2026-04-10T00:11:00.000Z',
+  }));
+
   await testEnv.cleanup();
   console.log('PASS Firestore emulator rules transitions and active-flag guard');
 }

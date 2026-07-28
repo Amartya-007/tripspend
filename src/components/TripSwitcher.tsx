@@ -16,6 +16,11 @@ interface TripSwitcherProps {
   onDeleteTrip: (tripId: string) => void;
   onRenameTrip: (tripId: string, newName: string) => void;
   notify?: (payload: NotificationPayload) => void;
+  /** Whether the current user created the active trip — gates invite revocation. */
+  isTripCreator?: boolean;
+  /** Whether the active trip's invite code currently accepts new joins. Defaults to true. */
+  inviteActive?: boolean;
+  onToggleInviteActive?: (active: boolean) => Promise<boolean>;
 }
 
 export function TripSwitcher({
@@ -28,6 +33,9 @@ export function TripSwitcher({
   onDeleteTrip,
   onRenameTrip,
   notify,
+  isTripCreator,
+  inviteActive = true,
+  onToggleInviteActive,
 }: TripSwitcherProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,6 +46,7 @@ export function TripSwitcher({
   const [joining, setJoining] = useState(false);
   const [generatingInviteCode, setGeneratingInviteCode] = useState(false);
   const [generatedInviteCode, setGeneratedInviteCode] = useState<string | null>(null);
+  const [togglingInvite, setTogglingInvite] = useState(false);
   const [tab, setTab] = useState<'trips' | 'invite' | 'join'>('trips');
 
   const activeTripName = useMemo(
@@ -119,6 +128,26 @@ Open TripSpend app → Settings → My Trips → Join and enter this 12-digit co
       setGeneratingInviteCode(false);
     }
   }, [generatingInviteCode, onGenerateInviteCode, onSelectTrip, push]);
+
+  const handleToggleInviteActive = useCallback(async () => {
+    if (!onToggleInviteActive || togglingInvite) return;
+    const nextActive = !inviteActive;
+    setTogglingInvite(true);
+    try {
+      const ok = await onToggleInviteActive(nextActive);
+      if (ok) {
+        push({
+          title: nextActive ? 'Invite reactivated' : 'Invite revoked',
+          message: nextActive ? 'New people can join with this code again.' : 'No one can join with this code until you reactivate it.',
+          variant: 'success',
+        });
+      } else {
+        push({ title: 'Could not update invite', message: 'Please try again.', variant: 'error' });
+      }
+    } finally {
+      setTogglingInvite(false);
+    }
+  }, [inviteActive, onToggleInviteActive, push, togglingInvite]);
 
   const handleJoinTrip = useCallback(async () => {
     if (!onJoinTrip || joining) return;
@@ -368,6 +397,29 @@ Open TripSpend app → Settings → My Trips → Join and enter this 12-digit co
                       ? 'Share only this code. Friends paste it in Settings → My Trips → Join tab.'
                       : 'Tap Generate Invite Code to create a cloud trip code, then share it.'}
                   </p>
+
+                  {isTripCreator && canShareInviteCode && onToggleInviteActive && (
+                    <button
+                      onClick={() => { void handleToggleInviteActive(); }}
+                      disabled={togglingInvite}
+                      className={`w-full py-2.5 rounded-xl text-xs font-bold disabled:opacity-50 transition-colors ${
+                        inviteActive
+                          ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                          : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {togglingInvite
+                        ? 'Updating...'
+                        : inviteActive
+                          ? 'Revoke invite code'
+                          : 'Reactivate invite code'}
+                    </button>
+                  )}
+                  {isTripCreator && canShareInviteCode && !inviteActive && (
+                    <p className="text-[10px] text-red-500 text-center leading-relaxed">
+                      This invite code is currently revoked — no one can join with it.
+                    </p>
+                  )}
                 </div>
               )}
 

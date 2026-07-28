@@ -48,6 +48,9 @@ interface SettingsProps {
   onSelectTrip?: (tripId: string) => void;
   onDeleteTrip?: (tripId: string) => void;
   onRenameTrip?: (tripId: string, newName: string) => void;
+  isTripCreator?: boolean;
+  inviteActive?: boolean;
+  onToggleInviteActive?: (active: boolean) => Promise<boolean>;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -101,6 +104,9 @@ export const Settings: React.FC<SettingsProps> = ({
   onSelectTrip,
   onDeleteTrip,
   onRenameTrip,
+  isTripCreator,
+  inviteActive,
+  onToggleInviteActive,
 }) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -495,6 +501,9 @@ export const Settings: React.FC<SettingsProps> = ({
               onDeleteTrip={(tripId) => onDeleteTrip?.(tripId)}
               onRenameTrip={(tripId, name) => onRenameTrip?.(tripId, name)}
               notify={pushNotice}
+              isTripCreator={isTripCreator}
+              inviteActive={inviteActive}
+              onToggleInviteActive={onToggleInviteActive}
             />
           </div>
         </Section>

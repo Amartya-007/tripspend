@@ -70,6 +70,7 @@ export function useCollaborativeTripData({ userUid, enabled, onRemoteUpdate }: U
         name: typeof payload.name === 'string' ? payload.name : 'Trip',
         createdAt: toIso(payload.createdAt),
         updatedAt: toIso(payload.updatedAt),
+        inviteActive: typeof payload.inviteActive === 'boolean' ? payload.inviteActive : true,
         data: {
           setup,
           deletedExpenseMap: {},
@@ -198,6 +199,8 @@ export function useCollaborativeTripData({ userUid, enabled, onRemoteUpdate }: U
     joinTrip: tripMutations.joinTrip,
     deleteTrip: tripMutations.deleteTrip,
     renameTrip: tripMutations.renameTrip,
+    setInviteActive: tripMutations.setInviteActive,
+    removeMemberUid: tripMutations.removeMemberUid,
     activeTrip,
     setActiveTripId,
     trips,
