@@ -19,7 +19,7 @@ export const MAX_NOTE_LENGTH = 100;
 export const MAX_TAGS_INPUT_LENGTH = 100;
 export const MAX_TAGS_COUNT = 10;
 export const MAX_SETTLEMENT_NOTE_LENGTH = 150;
-export const MAX_JOIN_TRIP_ID_LENGTH = 12;
+export const MAX_JOIN_TRIP_ID_LENGTH = 6;
 
 // Counter thresholds — show counter when usage >= this fraction of max
 export const COUNTER_THRESHOLD = 0.8;

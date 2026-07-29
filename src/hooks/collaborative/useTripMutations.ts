@@ -126,7 +126,7 @@ export const useTripMutations = ({
         }
       }
 
-      if (!tripRef) throw new Error('Failed to generate a unique 12-digit invite code');
+      if (!tripRef) throw new Error('Failed to generate a unique 6-digit invite code');
       
       const verifySnap = await getDoc(tripRef);
       if (!verifySnap.exists()) {
@@ -250,7 +250,7 @@ export const useTripMutations = ({
   const joinTrip = useCallback(async (tripId: string) => {
     if (!enabled || !firestore || !userUid) return false;
     const cleaned = tripId.trim();
-    if (!/^\d{12}$/.test(cleaned)) return false;
+    if (!/^\d{6}$/.test(cleaned)) return false;
 
     try {
       const tripRef = doc(firestore, 'trips', cleaned);

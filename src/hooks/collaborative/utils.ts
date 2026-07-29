@@ -48,13 +48,13 @@ export const toIso = (value: unknown): string => {
 export const generateShortCode = (): string => {
   let result = '';
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const values = new Uint8Array(12);
+    const values = new Uint8Array(6);
     crypto.getRandomValues(values);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 6; i++) {
       result += String(values[i] % 10);
     }
   } else {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 6; i++) {
       result += Math.floor(Math.random() * 10).toString();
     }
   }

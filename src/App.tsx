@@ -96,7 +96,7 @@ const DeepLinkHandler = () => {
         const joinTripId = parsed.searchParams.get('joinTripId');
         if (joinTripId) {
           const cleaned = joinTripId.trim();
-          if (/^\d{12}$/.test(cleaned)) {
+          if (/^\d{6}$/.test(cleaned)) {
             navigate(`/?joinTripId=${encodeURIComponent(cleaned)}`);
             return;
           }
@@ -149,7 +149,7 @@ const JoinTripQueryHandler = ({
     if (!joinTripId) return;
 
     const cleaned = joinTripId.trim();
-    if (/^\d{12}$/.test(cleaned)) {
+    if (/^\d{6}$/.test(cleaned)) {
       onJoinTripId(cleaned);
     }
 
@@ -470,7 +470,7 @@ export default function App() {
   const generateInviteCode = useCallback(async () => {
     if (!collaborativeModeRequested) return null;
 
-    if (usingCollaborativeStore && activeTrip && /^\d{12}$/.test(activeTrip)) {
+    if (usingCollaborativeStore && activeTrip && /^\d{6}$/.test(activeTrip)) {
       return activeTrip;
     }
 
@@ -478,7 +478,7 @@ export default function App() {
     if (!currentLocalTrip) return null;
 
     const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
-    if (typeof created === 'string' && /^\d{12}$/.test(created)) return created;
+    if (typeof created === 'string' && /^\d{6}$/.test(created)) return created;
     return null;
   }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
 
