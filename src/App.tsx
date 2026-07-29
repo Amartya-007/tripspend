@@ -1072,6 +1072,23 @@ export default function App() {
                 }
               />
               <Route
+                path="/edit/:id"
+                element={
+                  <AddExpense
+                    setup={data.setup}
+                    onAdd={addExpense}
+                    onUpdate={updateExpense}
+                    expenses={data.expenses}
+                    presets={presets}
+                    onAddPreset={addPreset}
+                    onToggleFavorite={togglePresetFavorite}
+                    isCollaborative={usingCollaborativeStore}
+                    userUid={user?.uid || null}
+                    myMemberId={collaborativeTripStore.myMemberId}
+                  />
+                }
+              />
+              <Route
                 path="/expense/:id"
                 element={
                   <ExpenseDetail

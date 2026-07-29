@@ -1,9 +1,10 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Expense, TripSetup } from '../utils/calculations.ts';
 import { formatCurrency } from '../utils/cn';
-import { Calendar, Tag, ArrowLeft, Pencil, Trash2, ReceiptText, AlertCircle, User, Users } from 'lucide-react';
+import { Calendar, Tag, ArrowLeft, Pencil, Trash2, ReceiptText, AlertCircle, User, Users, X } from 'lucide-react';
 import { format, isBefore, parseISO, startOfDay } from 'date-fns';
+import { AnimatePresence, motion } from 'motion/react';
 import { buildDisplayNameMap } from '../utils/memberDisplay';
 
 interface ExpenseDetailProps {
@@ -19,6 +20,9 @@ interface ExpenseDetailProps {
 export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete, setup, isCollaborative, userUid, myMemberId }) => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const expense = useMemo(() => expenses.find((item) => item.id === id), [expenses, id]);
 
@@ -62,6 +66,41 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
     return formatCurrency(expense.amount / participants.length);
   }, [expense, participants.length]);
 
+  const goToEdit = useCallback(() => {
+    if (!expense) return;
+    navigate(`/edit/${expense.id}`);
+  }, [navigate, expense]);
+
+  const openDeleteConfirm = useCallback(() => {
+    if (isLocked) {
+      alert('This expense is locked and cannot be deleted.');
+      return;
+    }
+    setDeleteError('');
+    setShowDeleteConfirm(true);
+  }, [isLocked]);
+
+  const cancelDelete = useCallback(() => {
+    if (isDeleting) return;
+    setShowDeleteConfirm(false);
+  }, [isDeleting]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!expense || isDeleting) return;
+
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await Promise.resolve(onDelete(expense.id));
+      navigate('/expenses');
+    } catch (error) {
+      console.error('[ExpenseDetail] Failed to delete expense:', error);
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+      setDeleteError('Could not delete this expense. Please try again.');
+    }
+  }, [expense, isDeleting, navigate, onDelete]);
+
   if (!expense) {
     return (
       <div className="page-shell">
@@ -77,23 +116,6 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
       </div>
     );
   }
-
-  const goToEdit = useCallback(() => {
-    navigate(`/edit/${expense.id}`);
-  }, [navigate, expense.id]);
-
-  const handleDelete = useCallback(async () => {
-    if (isLocked) {
-      alert('This expense is locked and cannot be deleted.');
-      return;
-    }
-
-    const shouldDelete = window.confirm('Delete this expense?');
-    if (!shouldDelete) return;
-
-    await Promise.resolve(onDelete(expense.id));
-    navigate('/expenses');
-  }, [expense.id, isLocked, navigate, onDelete]);
 
   return (
     <div className="page-shell space-y-6">
@@ -111,6 +133,13 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-amber-700 text-sm font-medium">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           This expense is locked for editing/deleting.
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-rose-700 text-sm font-medium">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          {deleteError}
         </div>
       )}
 
@@ -234,14 +263,73 @@ export const ExpenseDetail: React.FC<ExpenseDetailProps> = ({ expenses, onDelete
         </button>
 
         <button
-          onClick={handleDelete}
+          onClick={openDeleteConfirm}
           disabled={Boolean(isLocked)}
-          className="w-full py-3 rounded-2xl bg-red-50 hover:bg-red-100 disabled:bg-slate-100 text-red-600 disabled:text-slate-400 font-bold inline-flex items-center justify-center gap-2 border border-red-100 disabled:border-slate-200"
+          className="w-full py-3 rounded-2xl bg-rose-50 hover:bg-rose-100 disabled:bg-slate-100 text-rose-600 disabled:text-slate-400 font-bold inline-flex items-center justify-center gap-2 border border-rose-100 disabled:border-slate-200"
         >
           <Trash2 className="w-4 h-4" />
           Delete
         </button>
       </div>
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] bg-slate-900/40 flex items-end sm:items-center justify-center p-4"
+            onClick={cancelDelete}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.97 }}
+              className="w-full max-w-sm bg-white rounded-[2rem] border border-slate-100 shadow-2xl ring-2 ring-rose-200 p-6"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelDelete}
+                  disabled={isDeleting}
+                  className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="mt-4 text-lg font-black text-slate-900">Delete this expense?</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {formatCurrency(expense.amount)} · {expense.category} will be permanently removed. This can't be undone.
+              </p>
+
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={cancelDelete}
+                  disabled={isDeleting}
+                  className="w-full py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={isDeleting}
+                  className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold inline-flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
