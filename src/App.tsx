@@ -105,7 +105,7 @@ const DeepLinkHandler = () => {
         const joinTripId = parsed.searchParams.get('joinTripId');
         if (joinTripId) {
           const cleaned = joinTripId.trim();
-          if (/^\d{12}$/.test(cleaned)) {
+          if (/^\d{6}$/.test(cleaned)) {
             navigate(`/?joinTripId=${encodeURIComponent(cleaned)}`);
             return;
           }
@@ -161,8 +161,8 @@ const JoinTripQueryHandler = ({
     if (!joinTripId) return;
 
     const cleaned = joinTripId.trim();
-    // Validate that the trip ID is exactly a 12-digit code
-    if (/^\d{12}$/.test(cleaned)) {
+    // Validate that the trip ID is exactly a 6-digit code
+    if (/^\d{6}$/.test(cleaned)) {
       onJoinTripId(cleaned);
     }
 
@@ -505,18 +505,33 @@ export default function App() {
   // shared cloud trip, its doc id *is* the invite code — no new trip needed. Otherwise
   // this is a local-only trip being shared for the first time, so we migrate its actual
   // setup + expenses into the cloud trip rather than creating a disconnected empty one.
+  //
+  // NOTE: these internal "is this id a cloud trip id" checks intentionally accept any
+  // all-digit string (not just exactly 6 digits). Local trip ids always look like
+  // `trip_<timestamp>_<random>` (never purely numeric), so `/^\d+$/` still reliably
+  // distinguishes a cloud trip id from a local one. Gating on the *current* code length
+  // (6) here would silently discard a still-valid trip that was migrated to the cloud
+  // before the 6-digit format was restored — new codes are always generated at 6 digits
+  // via generateShortCode(), but existing ones must keep working.
   const generateInviteCode = useCallback(async () => {
-    if (!collaborativeModeRequested) return null;
+    if (!collaborativeModeRequested) {
+      console.warn('[generateInviteCode] Skipped: collaborative mode not requested (not signed in or Firebase not configured).');
+      return null;
+    }
 
-    if (usingCollaborativeStore && activeTrip && /^\d{12}$/.test(activeTrip)) {
+    if (usingCollaborativeStore && activeTrip && /^\d+$/.test(activeTrip)) {
       return activeTrip;
     }
 
     const currentLocalTrip = localTripsForMigration.find((trip) => trip.id === localActiveTripId);
-    if (!currentLocalTrip) return null;
+    if (!currentLocalTrip) {
+      console.error('[generateInviteCode] No local trip found to migrate.', { localActiveTripId, availableTripIds: localTripsForMigration.map((trip) => trip.id) });
+      return null;
+    }
 
     const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
-    if (typeof created === 'string' && /^\d{12}$/.test(created)) return created;
+    if (typeof created === 'string' && /^\d+$/.test(created)) return created;
+    console.error('[generateInviteCode] importLocalTrips did not return a usable cloud trip id.', { created });
     return null;
   }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
 

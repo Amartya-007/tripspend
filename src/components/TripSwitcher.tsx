@@ -54,9 +54,12 @@ export function TripSwitcher({
     [activeTrip, trips]
   );
   const activeTripId = useMemo(() => activeTrip || null, [activeTrip]);
+  // Any all-digit id is a cloud trip id (local ids always look like `trip_<ts>_<rand>`,
+  // never purely numeric) — don't gate on the current 6-digit code length here, or a
+  // trip migrated before the 6-digit format was restored would wrongly show as unavailable.
   const effectiveInviteCode = useMemo(() => {
-    if (generatedInviteCode && /^\d{6}$/.test(generatedInviteCode)) return generatedInviteCode;
-    if (activeTripId && /^\d{6}$/.test(activeTripId)) return activeTripId;
+    if (generatedInviteCode && /^\d+$/.test(generatedInviteCode)) return generatedInviteCode;
+    if (activeTripId && /^\d+$/.test(activeTripId)) return activeTripId;
     return null;
   }, [activeTripId, generatedInviteCode]);
   const canShareInviteCode = Boolean(effectiveInviteCode);
@@ -117,13 +120,15 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
     setGeneratingInviteCode(true);
     try {
       const createdId = onGenerateInviteCode ? await onGenerateInviteCode() : null;
-      if (createdId && /^\d{6}$/.test(createdId)) {
+      if (createdId && /^\d+$/.test(createdId)) {
         setGeneratedInviteCode(createdId);
         return;
       }
-      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
-    } catch {
-      push({ title: 'Invite unavailable', message: 'Could not generate a 6-digit cloud invite code.', variant: 'error' });
+      console.error('[TripSwitcher] Invite code generation returned no usable id.', { createdId });
+      push({ title: 'Invite unavailable', message: 'Could not generate a cloud invite code. Please try again.', variant: 'error' });
+    } catch (error) {
+      console.error('[TripSwitcher] Invite code generation threw an error.', error);
+      push({ title: 'Invite unavailable', message: 'Could not generate a cloud invite code. Please try again.', variant: 'error' });
     } finally {
       setGeneratingInviteCode(false);
     }

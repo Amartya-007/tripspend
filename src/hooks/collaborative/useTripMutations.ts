@@ -143,7 +143,10 @@ export const useTripMutations = ({
   }, [enabled, userUid, setActiveTripWithPreserve]);
 
   const importLocalTrips = useCallback(async (localTrips: Trip[], preferredActiveTripId: string | null): Promise<string | null> => {
-    if (!enabled || !firestore || !userUid) return null;
+    if (!enabled || !firestore || !userUid) {
+      console.error('[importLocalTrips] Aborted: cloud mode not usable.', { enabled, hasFirestore: Boolean(firestore), hasUserUid: Boolean(userUid) });
+      return null;
+    }
     if (!Array.isArray(localTrips) || localTrips.length === 0) return null;
 
     try {
