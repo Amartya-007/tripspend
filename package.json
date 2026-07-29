@@ -11,7 +11,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "tsx tests/member-management-properties.ts",
-    "test:rules": "npx firebase emulators:exec --only firestore \"tsx tests/firestore-rules-emulator.ts\""
+    "test:rules": "npx firebase emulators:exec --only firestore \"tsx tests/firestore-rules-emulator.ts\"",
+    "deploy:rules": "npx firebase deploy --only firestore:rules"
   },
   "dependencies": {
     "@capacitor-community/contacts": "^7.1.0",
