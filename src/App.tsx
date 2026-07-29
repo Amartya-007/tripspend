@@ -29,12 +29,16 @@ import { saveTripToCloud, loadAllTripsFromCloud, syncTripIncremental } from './s
 import { clearAccountScopedStorage } from './utils/privacy';
 import { buildDisplayNameMap } from './utils/memberDisplay';
 
+// Navigation paths where pressing the native Android back button should exit the app instead of going back
 const EXIT_PATHS = new Set(['/', '/setup']);
+
+// Storage keys used to save app preferences and temporary data in the browser/device
 const ONBOARDING_KEY = 'tripspend_onboarding_done_v1';
 const SYNC_QUEUE_KEY = 'tripspend_sync_queue_v1';
 const PENDING_JOIN_KEY = 'tripspend_pending_join_id';
 const WORKSPACE_MODE_KEY = 'tripspend_workspace_mode_v1';
 
+// Structure for items waiting in the offline sync retry queue
 interface SyncQueueItem {
   tripId: string;
   enqueuedAt: number;
@@ -42,6 +46,7 @@ interface SyncQueueItem {
   nextRetryAt: number;
 }
 
+// Safely reads any queued background sync tasks saved in local storage
 const readSyncQueue = (): SyncQueueItem[] => {
   try {
     const raw = localStorage.getItem(SYNC_QUEUE_KEY);
@@ -53,6 +58,7 @@ const readSyncQueue = (): SyncQueueItem[] => {
   }
 };
 
+// Screen shown to new users asking if they want to create a brand new trip or join an existing one via invite code
 const PreSetupChoiceRoute = ({
   defaultJoinTripId,
   onJoinTrip,
@@ -76,16 +82,19 @@ const PreSetupChoiceRoute = ({
   );
 };
 
+// Listens for custom app link URLs (like tripspend://...) clicked on mobile devices to open specific trips or pages
 const DeepLinkHandler = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Deep links only apply when running natively inside a mobile app (iOS/Android)
     if (!Capacitor.isNativePlatform()) {
       return;
     }
 
     let handler: { remove: () => Promise<void> } | undefined;
 
+    // Parses custom link strings and redirects the user to the matching screen or join code
     const routeFromUrl = (rawUrl: string) => {
       try {
         const parsed = new URL(rawUrl);
@@ -96,7 +105,7 @@ const DeepLinkHandler = () => {
         const joinTripId = parsed.searchParams.get('joinTripId');
         if (joinTripId) {
           const cleaned = joinTripId.trim();
-          if (/^\d{6}$/.test(cleaned)) {
+          if (/^\d{12}$/.test(cleaned)) {
             navigate(`/?joinTripId=${encodeURIComponent(cleaned)}`);
             return;
           }
@@ -112,6 +121,7 @@ const DeepLinkHandler = () => {
       }
     };
 
+    // Registers the app link listener with native device software
     const registerHandler = async () => {
       handler = await CapacitorApp.addListener('appUrlOpen', (event) => {
         if (event.url) {
@@ -119,6 +129,7 @@ const DeepLinkHandler = () => {
         }
       });
 
+      // Handle the case where the app was opened directly from a deep link cold-start
       const launch = await CapacitorApp.getLaunchUrl();
       if (launch?.url) {
         routeFromUrl(launch.url);
@@ -135,6 +146,7 @@ const DeepLinkHandler = () => {
   return null;
 };
 
+// Checks the web URL query string for a `?joinTripId=...` parameter and triggers the join flow
 const JoinTripQueryHandler = ({
   onJoinTripId,
 }: {
@@ -149,10 +161,12 @@ const JoinTripQueryHandler = ({
     if (!joinTripId) return;
 
     const cleaned = joinTripId.trim();
-    if (/^\d{6}$/.test(cleaned)) {
+    // Validate that the trip ID is exactly a 12-digit code
+    if (/^\d{12}$/.test(cleaned)) {
       onJoinTripId(cleaned);
     }
 
+    // Clean up the URL by removing the joinTripId parameter from the query string
     params.delete('joinTripId');
     const nextSearch = params.toString();
     navigate({
@@ -164,12 +178,14 @@ const JoinTripQueryHandler = ({
   return null;
 };
 
+// Automatically scrolls the window back to the top whenever the page path changes
 const ScrollToTop = () => {
   const { pathname } = useLocation();
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
   return null;
 };
 
+// Redirects the user to a specific screen when they tap on a system notification
 const NotificationRouteHandler = ({
   route,
   onHandled,
@@ -198,6 +214,7 @@ const NotificationRouteHandler = ({
   return null;
 };
 
+// Handles hardware back button presses on Android devices
 const BackButtonGuard = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -211,6 +228,7 @@ const BackButtonGuard = () => {
 
     const registerHandler = async () => {
       handler = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+        // If we are on the home screen or setup screen, close the app. Otherwise, go back one page.
         if (!EXIT_PATHS.has(location.pathname)) {
           navigate(-1);
         } else {
@@ -229,6 +247,7 @@ const BackButtonGuard = () => {
   return null;
 };
 
+// Screen prompting unauthenticated users to sign in with Google before enabling cloud features
 const AuthPrompt = ({ onSignIn }: { onSignIn: () => void }) => (
   <div className="min-h-screen px-4 py-8 flex items-center justify-center bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
     <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl p-8 text-center border border-white/50 backdrop-blur-sm">
@@ -256,6 +275,7 @@ const AuthPrompt = ({ onSignIn }: { onSignIn: () => void }) => (
   </div>
 );
 
+// Loading state displayed while waiting for the user to accept push notification permissions
 const NotificationPermissionGate = () => (
   <div className="min-h-screen px-4 py-8 flex items-center justify-center bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100">
     <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl p-8 text-center">
@@ -266,7 +286,9 @@ const NotificationPermissionGate = () => (
   </div>
 );
 
+// Main Application Component
 export default function App() {
+  // Flag tracking if the user has completed the welcome onboarding flow
   const [onboardingDone, setOnboardingDone] = useState<boolean>(() => {
     try {
       return localStorage.getItem(ONBOARDING_KEY) === '1';
@@ -275,6 +297,7 @@ export default function App() {
     }
   });
 
+  // UI state flags
   const [signingIn, setSigningIn] = useState(false);
   const [isTripSwitching, setIsTripSwitching] = useState(false);
   const [pendingTripName, setPendingTripName] = useState('');
@@ -288,6 +311,8 @@ export default function App() {
   const [collabReady, setCollabReady] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [showIdentityPicker, setShowIdentityPicker] = useState(false);
+  
+  // Stores a trip ID if the user clicked an invite link before logging in
   const [pendingJoinTripId, setPendingJoinTripId] = useState<string | null>(() => {
     try {
       return localStorage.getItem(PENDING_JOIN_KEY);
@@ -295,10 +320,13 @@ export default function App() {
       return null;
     }
   });
+
+  // References used for keeping state up-to-date inside asynchronous callbacks without triggering re-renders
   const lastAutoSyncSignatureRef = useRef('');
   const isAutoSyncInFlightRef = useRef(false);
   const tripSwitchTimeoutRef = useRef<number | null>(null);
 
+  // Track whether the app was previously operating in offline ('local') or cloud ('collaborative') mode
   const [storedWorkspaceMode, setStoredWorkspaceMode] = useState<'local' | 'collaborative'>(() => {
     try {
       const mode = localStorage.getItem(WORKSPACE_MODE_KEY);
@@ -308,8 +336,10 @@ export default function App() {
     }
   });
 
+  // Local device storage hook (used for offline trips)
   const localTripStore = useTripData();
 
+  // Firebase Authentication hook
   const {
     user,
     loading: authLoading,
@@ -318,6 +348,7 @@ export default function App() {
     isConfigured: firebaseConfigured,
   } = useFirebaseAuth();
 
+  // Cloud collaborative mode is requested whenever Firebase is configured and a user is logged in
   const collaborativeModeRequested = Boolean(firebaseConfigured && user);
 
   // Use a ref so handleRemoteUpdate can read activeTrip without a stale closure
@@ -325,6 +356,7 @@ export default function App() {
   const activeTripRef = useRef<string | null>(null);
   const cloudAccessDeniedNotificationShownRef = useRef(false);
 
+  // Callback executed when changes are pushed from another device/member
   const handleRemoteUpdate = useCallback((tripId: string) => {
     setNotification((prev) => {
       if (prev?.title === 'Trip updated') return prev;
@@ -338,14 +370,17 @@ export default function App() {
     });
   }, []);
 
+  // Hook for handling collaborative cloud trips via Firestore
   const collaborativeTripStore = useCollaborativeTripData({
     userUid: user?.uid || null,
     enabled: collaborativeModeRequested,
     onRemoteUpdate: handleRemoteUpdate,
   });
 
+  // Collaborative mode is active as long as requested and cloud access isn't blocked/denied
   const collaborativeMode = collaborativeModeRequested && !collaborativeTripStore.cloudAccessDenied;
 
+  // Helper flags derived from store states
   const localHasSetup = Boolean(localTripStore.data.setup);
   const localActiveTripId = localTripStore.activeTrip;
   const localTripsForMigration = localTripStore.trips;
@@ -353,6 +388,7 @@ export default function App() {
   const collaborativeHasTrips = collaborativeTrips.length > 0;
   const collaborativeHasAnySetup = collaborativeTrips.some((trip) => Boolean(trip.data.setup));
 
+  // Determine whether we should present cloud data or fall back to local data
   useEffect(() => {
     if (!collaborativeModeRequested) {
       setCollabReady(false);
@@ -397,6 +433,7 @@ export default function App() {
     localHasSetup,
   ]);
 
+  // Select the appropriate data store based on availability and readiness
   const usingCollaborativeStore = collaborativeMode && collabReady;
   const tripStore = usingCollaborativeStore ? collaborativeTripStore : localTripStore;
 
@@ -434,6 +471,7 @@ export default function App() {
     return localHydrated;
   }, [storedWorkspaceMode, authLoading, user, collabReady, collaborativeTripStore.cloudAccessDenied, collaborativeTripStore.tripsLoaded, localTripStore]);
 
+  // Extract functions and data from the active trip store
   const {
     data,
     presets,
@@ -470,7 +508,7 @@ export default function App() {
   const generateInviteCode = useCallback(async () => {
     if (!collaborativeModeRequested) return null;
 
-    if (usingCollaborativeStore && activeTrip && /^\d{6}$/.test(activeTrip)) {
+    if (usingCollaborativeStore && activeTrip && /^\d{12}$/.test(activeTrip)) {
       return activeTrip;
     }
 
@@ -478,7 +516,7 @@ export default function App() {
     if (!currentLocalTrip) return null;
 
     const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
-    if (typeof created === 'string' && /^\d{6}$/.test(created)) return created;
+    if (typeof created === 'string' && /^\d{12}$/.test(created)) return created;
     return null;
   }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
 
@@ -495,6 +533,7 @@ export default function App() {
     return collaborativeTripStore.setInviteActive(activeTrip, active);
   }, [usingCollaborativeStore, activeTrip, collaborativeTripStore]);
 
+  // Member management interface helper
   const memberRegistryApi = useMemberRegistry({
     setup: data.setup,
     saveSetup,
@@ -528,6 +567,7 @@ export default function App() {
   // Keep activeTripRef in sync so handleRemoteUpdate can read it without stale closure
   useEffect(() => { activeTripRef.current = activeTrip ?? null; }, [activeTrip]);
 
+  // Handler for receiving and storing join trip IDs from links
   const handleIncomingJoinTripId = useCallback((joinTripId: string) => {
     setPendingJoinTripId(joinTripId);
     try {
@@ -537,10 +577,12 @@ export default function App() {
     }
   }, []);
 
+  // Sets the destination screen when triggered from a notification
   const handleNotificationRoute = useCallback((route: NotificationRoute) => {
     setPendingNotificationRoute(route);
   }, []);
 
+  // Display a temporary banner notification inside the app
   const notify = useCallback((payload: NotificationPayload) => {
     setNotification({ ...payload, id: Date.now() });
   }, []);
@@ -552,6 +594,7 @@ export default function App() {
     }
   }, [collaborativeModeRequested]);
 
+  // Show a warning if cloud connectivity fails or permission is denied
   useEffect(() => {
     // Only show the notification once per session when cloud access is denied.
     // Never show it when the user simply has no collaborative trips yet
@@ -579,6 +622,7 @@ export default function App() {
     });
   }, [collaborativeModeRequested, collaborativeTripStore.cloudAccessDenied, collaborativeTrips.length, notify]);
 
+  // Hook for scheduling and managing local push notifications/reminders
   const {
     notificationsEnabled,
     dailyExpenseRemindersEnabled,
@@ -599,6 +643,7 @@ export default function App() {
     userUid: user?.uid || null,
   });
 
+  // Prompt for notification permissions right after completing onboarding
   useEffect(() => {
     if (!onboardingDone) return;
     if (notificationGateComplete) return;
@@ -613,6 +658,7 @@ export default function App() {
     void runGate();
   }, [onboardingDone, notificationGateComplete, notificationPermission, requestInitialNotificationPermission]);
 
+  // Handles Google login action with user feedback
   const handleGoogleSignIn = useCallback(async () => {
     if (signingIn) return;
     setSigningIn(true);
@@ -646,6 +692,7 @@ export default function App() {
     }
   }, [notify, signInWithGoogle, signingIn]);
 
+  // Handles signing out and clearing account-specific local data
   const handleGoogleSignOut = useCallback(async () => {
     try {
       await unregisterDeviceToken();
@@ -657,6 +704,7 @@ export default function App() {
     }
   }, [logout, notify, unregisterDeviceToken]);
 
+  // Re-triggers sign-in to switch Google accounts
   const handleSwitchAccount = useCallback(async () => {
     try {
       await signInWithGoogle();
@@ -665,6 +713,7 @@ export default function App() {
     }
   }, [signInWithGoogle]);
 
+  // Manually triggers a cloud backup for local trips
   const handleCloudBackup = useCallback(async () => {
     if (!user) {
       notify({ title: 'Sign In Required', message: 'Sign in with Google first.', variant: 'warning' });
@@ -694,6 +743,7 @@ export default function App() {
     }
   }, [activeTrip, notify, trips, user, usingCollaborativeStore]);
 
+  // Restores a trip backup from the cloud into local storage
   const handleCloudRestore = useCallback(async () => {
     if (!user) {
       notify({ title: 'Sign In Required', message: 'Sign in with Google first.', variant: 'warning' });
@@ -729,12 +779,14 @@ export default function App() {
     }
   }, [notify, restoreData, user, usingCollaborativeStore]);
 
+  // Helper flags determining which screen/modal to display during application boot
   const isSetup = isHydrated && !!data.setup;
   const shouldShowOnboarding = isHydrated && !isSetup && !onboardingDone;
   const shouldShowNotificationGate = isHydrated && !isSetup && onboardingDone && !notificationGateComplete;
   const shouldShowPreSetupAuthPrompt = isHydrated && !isSetup && onboardingDone && notificationGateComplete && firebaseConfigured && !authLoading && !user;
   const shouldShowPreSetupChoice = isHydrated && !isSetup && onboardingDone && notificationGateComplete && !!user;
 
+  // Save onboarding completion status
   const completeOnboarding = useCallback(() => {
     setOnboardingDone(true);
     try {
@@ -742,6 +794,7 @@ export default function App() {
     } catch { /* ignore */ }
   }, []);
 
+  // Handles switching between different active trips with a brief loading overlay
   const handleTripSelect = useCallback((tripId: string) => {
     if (tripId === activeTrip) return;
     const targetName = trips.find((trip) => trip.id === tripId)?.name || 'trip';
@@ -759,11 +812,13 @@ export default function App() {
     }, 550);
   }, [activeTrip, setActiveTripId, trips]);
 
+  // Rename the current active trip
   const handleNameCurrentTrip = useCallback((name: string) => {
     if (!activeTrip) return;
     renameTrip(activeTrip, name);
   }, [activeTrip, renameTrip]);
 
+  // Calculate when the next offline sync attempt should occur
   const nextRetryAt = useMemo(() => {
     if (usingCollaborativeStore) return null;
     if (syncQueue.length === 0) return null;
@@ -774,10 +829,12 @@ export default function App() {
     return min;
   }, [syncQueue, usingCollaborativeStore]);
 
+  // Dismiss banner notification
   const closeNotification = useCallback(() => {
     setNotification(null);
   }, []);
 
+  // Clear pending trip join invitation
   const handleDismissPendingJoin = useCallback(() => {
     setPendingJoinTripId(null);
     try {
@@ -793,6 +850,8 @@ export default function App() {
       <JoinTripQueryHandler onJoinTripId={handleIncomingJoinTripId} />
       <NotificationRouteHandler route={pendingNotificationRoute} onHandled={() => setPendingNotificationRoute(null)} />
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 font-sans text-slate-900">
+        
+        {/* Sign-in overlay indicator */}
         {signingIn && (
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/90 backdrop-blur-sm">
             <div className="w-16 h-16 rounded-3xl bg-blue-600 flex items-center justify-center mb-5 shadow-xl shadow-blue-200">
@@ -805,6 +864,8 @@ export default function App() {
             <p className="text-sm text-slate-500 mt-1">Just a moment</p>
           </div>
         )}
+
+        {/* Data migration overlay indicator */}
         {isMigrating && (
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/95 backdrop-blur-sm">
             <div className="w-16 h-16 rounded-3xl bg-blue-600 flex items-center justify-center mb-5 shadow-xl shadow-blue-200">
@@ -817,6 +878,8 @@ export default function App() {
             <p className="text-sm text-slate-500 mt-1">Moving your data to the cloud. Don't close the app.</p>
           </div>
         )}
+
+        {/* Modal popup when receiving a trip invitation code/link */}
         {pendingJoinTripId && (
           <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50">
             <motion.div
@@ -881,6 +944,7 @@ export default function App() {
           </div>
         )}
 
+        {/* Identity selection modal prompting the user to select which member in the shared trip they are */}
         {showIdentityPicker && usingCollaborativeStore && Object.keys(data.setup?.memberRegistry || {}).length > 0 && !collaborativeTripStore.myMemberId && (
           <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50">
             <div className="w-full max-w-md bg-white rounded-t-3xl p-6 shadow-2xl"
@@ -936,8 +1000,10 @@ export default function App() {
           </div>
         )}
 
+        {/* Primary Page Route Definitions */}
         <Routes>
           {!isHydrated ? (
+            /* Loading screen shown while storage and auth states are initializing */
             <Route path="*" element={
               <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100">
                 <div className="text-center">
@@ -952,12 +1018,16 @@ export default function App() {
               </div>
             } />
           ) : shouldShowOnboarding ? (
+            /* Welcome / Walkthrough screens for brand new installations */
             <Route path="*" element={<OnboardingScreen onComplete={completeOnboarding} />} />
           ) : shouldShowNotificationGate ? (
+            /* Push notification request screen */
             <Route path="*" element={<NotificationPermissionGate />} />
           ) : shouldShowPreSetupAuthPrompt ? (
+            /* Sign-in prompt prior to initial trip creation */
             <Route path="*" element={<AuthPrompt onSignIn={handleGoogleSignIn} />} />
           ) : shouldShowPreSetupChoice ? (
+            /* Choose between joining a trip or creating a new one */
             <>
               <Route
                 path="/setup"
@@ -982,12 +1052,15 @@ export default function App() {
               />
             </>
           ) : !isSetup ? (
+            /* Setup wizard for configuring initial trip currency, members, and details */
             <Route
               path="*"
               element={<SetupScreen onSave={saveSetup} initialData={data.setup} onNameTrip={handleNameCurrentTrip} />}
             />
           ) : (
+            /* Main Application Navigation Routes */
             <>
+              {/* Home Dashboard */}
               <Route
                 path="/"
                 element={
@@ -1019,6 +1092,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Analytics & Charts */}
               <Route
                 path="/analytics"
                 element={
@@ -1028,6 +1102,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Balance & Debt Settlements */}
               <Route
                 path="/settlement"
                 element={
@@ -1043,6 +1118,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Log of Past Settlements */}
               <Route
                 path="/settlement-log"
                 element={
@@ -1054,6 +1130,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Create Expense */}
               <Route
                 path="/add"
                 element={
@@ -1071,6 +1148,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Edit Expense */}
               <Route
                 path="/edit/:id"
                 element={
@@ -1088,6 +1166,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Detailed Expense View */}
               <Route
                 path="/expense/:id"
                 element={
@@ -1102,6 +1181,7 @@ export default function App() {
                   />
                 }
               />
+              {/* All Expenses List View */}
               <Route
                 path="/expenses"
                 element={
@@ -1117,6 +1197,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Trip Configuration Details */}
               <Route
                 path="/trip-details"
                 element={
@@ -1126,6 +1207,7 @@ export default function App() {
                   />
                 }
               />
+              {/* Group Members Management */}
               <Route
                 path="/members"
                 element={
@@ -1141,7 +1223,9 @@ export default function App() {
                   />
                 }
               />
+              {/* Category Management */}
               <Route path="/categories" element={<CategoryManager setup={data.setup} onUpdate={saveSetup} />} />
+              {/* App & Account Settings */}
               <Route
                 path="/settings"
                 element={
@@ -1186,12 +1270,15 @@ export default function App() {
                   />
                 }
               />
+              {/* Edit Trip Setup Screen */}
               <Route path="/setup" element={<SetupScreen onSave={saveSetup} initialData={data.setup} onNameTrip={handleNameCurrentTrip} />} />
+              {/* Fallback route redirecting unknown paths back home */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}
         </Routes>
 
+        {/* Transition overlay shown when switching between active trips */}
         {isTripSwitching && (
           <div className="fixed inset-0 z-[120] bg-slate-900/35 backdrop-blur-[2px] flex items-center justify-center px-6">
             <div className="w-full max-w-xs rounded-2xl bg-white shadow-2xl border border-slate-200 p-5 text-center">
@@ -1202,11 +1289,13 @@ export default function App() {
           </div>
         )}
 
+        {/* Global Toast Notification Popup */}
         <NotificationCard
           notification={notification}
           onClose={closeNotification}
         />
         
+        {/* Bottom Navigation Bar */}
         {isSetup && <BottomNav />}
 
       </div>
