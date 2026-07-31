@@ -23,7 +23,7 @@ const ANIMATION_DELAYS = {
 
 interface DashboardProps {
   data: TripData;
-  onSaveSetup?: (setup: TripSetup) => void | Promise<void>;
+  onSaveSetup?: (setup: TripSetup) => void | boolean | Promise<void | boolean>;
   onAddExpense?: (expense: Expense) => void | Promise<void>;
   onUpdateExpense?: (expense: Expense) => void | Promise<void>;
   onDeleteExpense?: (id: string) => void | Promise<void>;

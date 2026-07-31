@@ -16,7 +16,7 @@ import {
 
 interface UseMemberRegistryInput {
   setup: TripSetup | null;
-  saveSetup: (setup: TripSetup) => void | Promise<void>;
+  saveSetup: (setup: TripSetup) => void | boolean | Promise<void | boolean>;
   isCollaborative: boolean;
   userUid: string | null;
   tripCreatorUid: string | null;

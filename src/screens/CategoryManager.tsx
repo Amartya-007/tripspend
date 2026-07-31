@@ -8,7 +8,7 @@ import { validateText, isDuplicate, sanitize } from '../utils/validation.ts';
 
 interface CategoryManagerProps {
   setup: TripSetup | null;
-  onUpdate: (setup: TripSetup) => void;
+  onUpdate: (setup: TripSetup) => void | boolean | Promise<void | boolean>;
 }
 
 export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdate }) => {

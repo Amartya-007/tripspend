@@ -28,7 +28,7 @@ type MemberContactChoice = {
 };
 
 interface SetupScreenProps {
-  onSave: (setup: TripSetup) => void;
+  onSave: (setup: TripSetup) => void | boolean | Promise<void | boolean>;
   initialData?: TripSetup | null;
   onNameTrip?: (name: string) => void;
   initialTripName?: string;
@@ -289,7 +289,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
     }
   }, [categories]);
 
-  const handleSave = useCallback(() => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
     if (peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE) {
       setSetupWarning(`People count must be between ${MIN_PEOPLE} and ${MAX_PEOPLE}.`);
       return;
@@ -314,24 +316,39 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
       }
 
       setSetupWarning('');
+      setSaving(true);
+      try {
+        const result = await Promise.resolve(onSave({
+          peopleCount: peopleNum,
+          budgetPerPerson: budgetNum,
+          totalBudget,
+          startDate,
+          endDate,
+          lockPreviousDays: lockPrevious,
+          participants: participants.filter(p => p.trim()),
+          participantPhoneNumbers: participants.reduce<Record<string, string>>((acc, person, index) => {
+            const name = person.trim();
+            const phone = participantPhoneNumbers[String(index)]?.trim();
+            if (name && phone) acc[name] = phone;
+            return acc;
+          }, {}),
+          customCategories: categories.filter(c => c.trim()),
+        }));
 
-      onSave({
-        peopleCount: peopleNum,
-        budgetPerPerson: budgetNum,
-        totalBudget,
-        startDate,
-        endDate,
-        lockPreviousDays: lockPrevious,
-        participants: participants.filter(p => p.trim()),
-        participantPhoneNumbers: participants.reduce<Record<string, string>>((acc, person, index) => {
-          const name = person.trim();
-          const phone = participantPhoneNumbers[String(index)]?.trim();
-          if (name && phone) acc[name] = phone;
-          return acc;
-        }, {}),
-        customCategories: categories.filter(c => c.trim()),
-      });
-      navigate('/');
+        // onSave may not report a result at all (local/offline mode always succeeds
+        // synchronously), so only a literal `false` is treated as a real failure.
+        if (result === false) {
+          setSetupWarning('Could not save your trip. Please check your connection and try again.');
+          return;
+        }
+
+        navigate('/');
+      } catch (error) {
+        console.error('[SetupScreen] Failed to save trip setup.', error);
+        setSetupWarning('Could not save your trip. Please check your connection and try again.');
+      } finally {
+        setSaving(false);
+      }
     }
   }, [budgetNum, categories, endDate, initialData, lockPrevious, navigate, onNameTrip, onSave, participantPhoneNumbers, participants, peopleNum, startDate, totalBudget, tripName]);
 
@@ -649,8 +666,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
               </div>
               <div className="flex gap-2">
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => goToStep('dates')} className="btn-secondary flex-1">← Back</motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={handleSave} disabled={peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE || budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON || endDate < startDate} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                  {initialData ? 'Update' : 'Start Trip'} <ArrowRight className="w-4 h-4" />
+                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { void handleSave(); }} disabled={saving || peopleNum < MIN_PEOPLE || peopleNum > MAX_PEOPLE || budgetNum <= 0 || budgetNum > MAX_BUDGET_PER_PERSON || endDate < startDate} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                  {saving ? 'Saving…' : (<>{initialData ? 'Update' : 'Start Trip'} <ArrowRight className="w-4 h-4" /></>)}
                 </motion.button>
               </div>
             </motion.div>

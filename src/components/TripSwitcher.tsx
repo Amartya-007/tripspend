@@ -108,7 +108,8 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
       }
       setNewTripName('');
       closeMenu();
-    } catch {
+    } catch (error) {
+      console.error('[TripSwitcher] Trip creation threw an error.', error);
       push({ title: 'Create failed', message: 'Could not create trip. Please try again.', variant: 'error' });
     } finally {
       setCreatingTrip(false);

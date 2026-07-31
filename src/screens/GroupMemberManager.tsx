@@ -15,7 +15,7 @@ import { buildDisplayNameMap } from '../utils/memberDisplay';
 interface GroupMemberManagerProps {
   setup: TripSetup | null;
   expenses?: Expense[];
-  onUpdate: (setup: TripSetup) => void | Promise<void>;
+  onUpdate: (setup: TripSetup) => void | boolean | Promise<void | boolean>;
   isCollaborative: boolean;
   userUid: string | null;
   tripCreatorUid: string | null;

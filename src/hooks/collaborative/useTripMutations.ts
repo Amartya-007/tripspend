@@ -23,8 +23,8 @@ export const useTripMutations = ({
   setCloudAccessDenied,
   setTripDocs,
 }: UseTripMutationsInput) => {
-  const saveSetup = useCallback(async (setup: TripSetup) => {
-    if (!enabled || !firestore || !userUid) return;
+  const saveSetup = useCallback(async (setup: TripSetup): Promise<boolean> => {
+    if (!enabled || !firestore || !userUid) return false;
 
     try {
       if (activeTrip) {
@@ -40,7 +40,7 @@ export const useTripMutations = ({
           setup,
           updatedAt: serverTimestamp(),
         });
-        return;
+        return true;
       }
 
       let tripRef: DocumentReference | null = null;
@@ -89,10 +89,13 @@ export const useTripMutations = ({
         },
       }));
       setActiveTripWithPreserve(tripRef.id);
+      return true;
     } catch (error) {
       console.error('Failed to save shared trip setup', error);
+      if (isPermissionDeniedError(error)) setCloudAccessDenied(true);
+      return false;
     }
-  }, [activeTrip, enabled, userUid, setActiveTripWithPreserve, setTripDocs]);
+  }, [activeTrip, enabled, userUid, setActiveTripWithPreserve, setCloudAccessDenied, setTripDocs]);
 
   const createTrip = useCallback(async (name: string, initialSetup?: TripSetup) => {
     if (!enabled || !firestore || !userUid) return null;
