@@ -21,18 +21,11 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
   const [editError, setEditError] = useState('');
   const [newCategory, setNewCategory] = useState('');
 
-  if (!setup) {
-    return (
-      <div className="page-shell">
-        <div className="text-slate-600">No trip setup found</div>
-      </div>
-    );
-  }
-
   useEffect(() => {
+    if (!setup) return;
     const next = setup.customCategories || ['Food', 'Travel', 'Stay', 'Misc'];
     setCategories(next);
-  }, [setup.customCategories]);
+  }, [setup]);
 
   const trimmedNewCategory = useMemo(() => newCategory.trim(), [newCategory]);
   const trimmedEditValue = useMemo(() => editValue.trim(), [editValue]);
@@ -88,6 +81,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
   }, [categories, editingIdx]);
 
   const handleSave = useCallback(() => {
+    if (!setup) return;
     onUpdate({
       ...setup,
       customCategories: categories.filter(c => c.trim()),
@@ -102,6 +96,14 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ setup, onUpdat
   const handleNewCategoryChange = useCallback((value: string) => {
     setNewCategory(value);
   }, []);
+
+  if (!setup) {
+    return (
+      <div className="page-shell">
+        <div className="text-slate-600">No trip setup found</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-shell space-y-6">
