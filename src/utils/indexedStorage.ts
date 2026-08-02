@@ -45,7 +45,13 @@ const openDb = (): Promise<IDBDatabase> => {
       reject(req.error || new Error('IndexedDB open failed'));
     };
     req.onblocked = () => {
+      // Another connection (e.g. a previous version of this page still open,
+      // common right after an app upgrade/reinstall in a WebView) is blocking
+      // this open() from completing. Without settling the promise here, every
+      // caller awaiting openDb() would hang forever — which previously caused
+      // the app to get stuck indefinitely on the initial loading screen.
       resetDbCache();
+      reject(new Error('IndexedDB open blocked by another connection'));
     };
   });
 
