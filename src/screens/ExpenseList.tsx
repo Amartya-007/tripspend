@@ -487,6 +487,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, setup, onUnd
     startDate,
     endDate,
     clearFilters,
+    displayNames,
   ]);
 
   return (
