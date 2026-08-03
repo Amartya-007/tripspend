@@ -573,6 +573,32 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
     }
   }, [clearScheduledReminders, preferences.enabled, scheduleLocalReminders, unregisterDeviceToken]);
 
+  // The native listener registration effect below must run exactly once per app
+  // lifetime -- nativeListenersReadyRef enforces that (Capacitor plugin listeners
+  // should not be re-added). But several of the functions its listeners call
+  // (scheduleLocalReminders, syncPermissionAndRegistration, persistTokenForUser)
+  // change identity often -- e.g. whenever trip data or preferences.enabled
+  // changes. Previously those were in the effect's own dependency array, which
+  // meant the effect legitimately re-ran on those changes; its cleanup then
+  // removed the real native listeners, but nativeListenersReadyRef blocked the
+  // re-run's setup() from ever re-registering them -- silently and permanently
+  // disabling push/local notification handling for the rest of the session
+  // after almost any app activity. Keeping "latest" refs here lets the effect
+  // register its listeners exactly once while those listeners still always call
+  // through to the current logic instead of a stale, mount-time closure.
+  const notifyRef = useRef(notify);
+  const recordDeliveredReminderRef = useRef(recordDeliveredReminder);
+  const routeFromNotificationRef = useRef(routeFromNotification);
+  const persistTokenForUserRef = useRef(persistTokenForUser);
+  const scheduleLocalRemindersRef = useRef(scheduleLocalReminders);
+  const syncPermissionAndRegistrationRef = useRef(syncPermissionAndRegistration);
+  notifyRef.current = notify;
+  recordDeliveredReminderRef.current = recordDeliveredReminder;
+  routeFromNotificationRef.current = routeFromNotification;
+  persistTokenForUserRef.current = persistTokenForUser;
+  scheduleLocalRemindersRef.current = scheduleLocalReminders;
+  syncPermissionAndRegistrationRef.current = syncPermissionAndRegistration;
+
   useEffect(() => {
     let appListener: { remove: () => Promise<void> } | undefined;
     let pushRegistrationListener: { remove: () => Promise<void> } | undefined;
@@ -589,7 +615,7 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
       await ensureNativeChannels();
 
       pushRegistrationListener = await PushNotifications.addListener('registration', async (token) => {
-        await persistTokenForUser(token.value);
+        await persistTokenForUserRef.current(token.value);
       });
 
       pushRegistrationErrorListener = await PushNotifications.addListener('registrationError', () => {
@@ -616,17 +642,17 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
 
         if (appActiveRef.current) {
           if (dedupKey) localStorage.setItem(dedupKey, '1');
-          notify(payload);
+          notifyRef.current(payload);
         }
 
         if (route) {
-          routeFromNotification(notification.data);
+          routeFromNotificationRef.current(notification.data);
         }
       });
 
       pushActionListener = await PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
         if (!notificationsEnabledRef.current) return;
-        routeFromNotification(action.notification.data);
+        routeFromNotificationRef.current(action.notification.data);
       });
 
       localReceivedListener = await LocalNotifications.addListener('localNotificationReceived', (notification) => {
@@ -641,7 +667,7 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
 
         if (appActiveRef.current) {
           if (dedupKey) localStorage.setItem(dedupKey, '1');
-          recordDeliveredReminder(dedupKey || `${notification.id}`, {
+          recordDeliveredReminderRef.current(dedupKey || `${notification.id}`, {
             title: notification.title || 'TripSpend',
             body: notification.body || '',
             data: route || undefined,
@@ -653,7 +679,7 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
 
       localActionListener = await LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
         if (!notificationsEnabledRef.current) return;
-        routeFromNotification(action.notification.extra);
+        routeFromNotificationRef.current(action.notification.extra);
       });
 
       appListener = await CapacitorApp.addListener('appStateChange', async ({ isActive }) => {
@@ -670,10 +696,10 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
               } catch {
                 // Best effort.
               }
-              await scheduleLocalReminders();
+              await scheduleLocalRemindersRef.current();
             }
           }
-          void syncPermissionAndRegistration();
+          void syncPermissionAndRegistrationRef.current();
         }
       });
 
@@ -682,7 +708,7 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
         // Keep existing deep link handling in App; this hook only deals with notifications.
       }
 
-      void syncPermissionAndRegistration();
+      void syncPermissionAndRegistrationRef.current();
     };
 
     void setup();
@@ -696,7 +722,12 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
       void localReceivedListener?.remove();
       void localActionListener?.remove();
     };
-  }, [notify, recordDeliveredReminder, routeFromNotification, syncPermissionAndRegistration]);
+    // Intentionally run once per app lifetime: nativeListenersReadyRef guards
+    // against re-registering native plugin listeners, so this effect must not
+    // re-run on every change to notify/recordDeliveredReminder/routeFromNotification/
+    // syncPermissionAndRegistration. Freshness is handled via the refs above instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!preferences.enabled) {
