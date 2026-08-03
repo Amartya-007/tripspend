@@ -334,7 +334,7 @@ export const Settlement: React.FC<SettlementProps> = ({
 
     appendHistory({ action: 'settled', from: sheetPayload.from, to: sheetPayload.to, amount: sheetPayload.amount, note: settlementNote });
     resetSheet();
-  }, [sheetPayload, collaborativeEnabled, tripId, userUid, settlementNote, proofImage, proofName, transferKey, appendHistory, resetSheet]);
+  }, [sheetPayload, collaborativeEnabled, tripId, userUid, settlementNote, proofImage, proofName, transferKey, appendHistory, resetSheet, isCreator, isFromMemberActive, isToMemberActive]);
 
   // Receiver confirms: "I received it" → status becomes 'completed'
   const confirmReceived = useCallback(async () => {
@@ -374,7 +374,7 @@ export const Settlement: React.FC<SettlementProps> = ({
 
     appendHistory({ action: 'settled', from: sheetPayload.from, to: sheetPayload.to, amount: sheetPayload.amount, note: settlementNote, proofImage: proofImage || undefined, proofName: proofName || undefined });
     resetSheet();
-  }, [sheetPayload, collaborativeEnabled, tripId, userUid, settlementNote, proofImage, proofName, transferKey, appendHistory, resetSheet]);
+  }, [sheetPayload, collaborativeEnabled, tripId, userUid, settlementNote, proofImage, proofName, transferKey, appendHistory, resetSheet, isCreator, isFromMemberActive, isToMemberActive]);
 
   const handleUnmark = useCallback(async (from: string, to: string, amount: number) => {
     const key = transferKey(from, to, amount);
