@@ -92,7 +92,7 @@ export interface SettlementSummary {
   totalToSettle: number;
 }
 
-const toIsoTime = (value: string | undefined) => {
+export const toIsoTime = (value: string | undefined) => {
   const parsed = value ? Date.parse(value) : 0;
   return Number.isFinite(parsed) ? parsed : 0;
 };

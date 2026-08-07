@@ -1,9 +1,4 @@
-import { MemberRecord, MemberRegistry } from './calculations';
-
-const toIsoTime = (value?: string) => {
-  const parsed = value ? Date.parse(value) : 0;
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+import { MemberRecord, MemberRegistry, toIsoTime } from './calculations';
 
 export const createMemberId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

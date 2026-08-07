@@ -18,6 +18,7 @@ import { MAX_SETTLEMENT_NOTE_LENGTH } from '../utils/constants.ts';
 import { showCounter } from '../utils/validation.ts';
 import { buildDisplayNameMap } from '../utils/memberDisplay';
 import { buildSettlementWritePayload } from '../utils/memberManagementCore';
+import { toIso } from '../hooks/collaborative/utils';
 import { fileToDataUrl } from '../utils/fileUtils.ts';
 
 interface ConfirmPayload {
@@ -117,15 +118,6 @@ export const Settlement: React.FC<SettlementProps> = ({
   const [sheetPayload, setSheetPayload] = useState<ConfirmPayload | null>(null);
 
   const collaborativeEnabled = Boolean(isCollaborative && tripId && userUid && firestore);
-
-  const toIso = useCallback((value: unknown): string => {
-    if (!value) return new Date().toISOString();
-    if (typeof value === 'string') return value;
-    if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
-      return (value as { toDate: () => Date }).toDate().toISOString();
-    }
-    return new Date().toISOString();
-  }, []);
 
   const transferKey = useCallback((from: string, to: string, amount: number) => {
     return `${from}|${to}|${Math.round(amount * 100)}`;
@@ -236,7 +228,7 @@ export const Settlement: React.FC<SettlementProps> = ({
     });
 
     return () => unsubscribe();
-  }, [collaborativeEnabled, settlement.transfers, toIso, tripId]);
+  }, [collaborativeEnabled, settlement.transfers, transferKey, tripId]);
 
   useEffect(() => {
     if (collaborativeEnabled) return;
