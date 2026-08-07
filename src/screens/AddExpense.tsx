@@ -524,7 +524,7 @@ export const AddExpense: React.FC<AddExpenseProps> = ({ onAdd, onUpdate, expense
     } finally {
       clearSubmissionState();
     }
-  }, [clearSubmissionState, isEditing, navigate, onAdd, onUpdate, setup]);
+  }, [clearSubmissionState, isEditing, navigate, onAdd, onUpdate]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();

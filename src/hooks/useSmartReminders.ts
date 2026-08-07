@@ -726,7 +726,6 @@ export function useSmartReminders({ tripId, data, notify, onNavigateNotification
     // against re-registering native plugin listeners, so this effect must not
     // re-run on every change to notify/recordDeliveredReminder/routeFromNotification/
     // syncPermissionAndRegistration. Freshness is handled via the refs above instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

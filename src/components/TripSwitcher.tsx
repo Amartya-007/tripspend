@@ -133,7 +133,7 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
     } finally {
       setGeneratingInviteCode(false);
     }
-  }, [generatingInviteCode, onGenerateInviteCode, onSelectTrip, push]);
+  }, [generatingInviteCode, onGenerateInviteCode, push]);
 
   const handleToggleInviteActive = useCallback(async () => {
     if (!onToggleInviteActive || togglingInvite) return;
