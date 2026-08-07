@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, RotateCcw, FileImage, History, MessageSquare, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, RotateCcw, FileImage, History, MessageSquare } from 'lucide-react';
 import { formatCurrency } from '../utils/cn';
 import { SettlementHistoryEntry } from '../utils/settlementHistory.ts';
 import { useSettlementHistory } from '../hooks/useSettlementHistory.ts';
@@ -28,7 +28,7 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
   setup = null,
 }) => {
   const navigate = useNavigate();
-  const { entries, clear } = useSettlementHistory({
+  const { entries } = useSettlementHistory({
     tripId,
     isCollaborative,
   });
@@ -72,14 +72,14 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
     setPreviewProof(proof || null);
   }, []);
 
-  const handleClear = useCallback(() => {
-    if (!window.confirm('Clear full settlement log? This does not change current settled state.')) return;
-    clear();
-  }, [clear]);
 
   return (
     <div className="page-shell space-y-5">
       <div className="page-header flex items-center justify-between">
+        <div>
+          <h1 className="page-title">Full Settlement Log</h1>
+          <p className="page-subtitle">Complete audit trail of settle and reopen actions</p>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={goBack}
@@ -88,10 +88,6 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            <h1 className="page-title">Full Settlement Log</h1>
-            <p className="page-subtitle">Complete audit trail of settle and reopen actions</p>
-          </div>
         </div>
       </div>
 
@@ -101,13 +97,6 @@ export const SettlementLog: React.FC<SettlementLogProps> = ({
             <span className="text-emerald-600 font-bold">{stats.settled}</span> settled actions ·{' '}
             <span className="text-amber-600 font-bold">{stats.undone}</span> reopen actions
           </div>
-          <button
-            onClick={handleClear}
-            className="px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-red-600 text-xs font-bold inline-flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear Log
-          </button>
         </div>
       )}
 
