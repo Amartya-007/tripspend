@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { collection, deleteDoc, doc, writeBatch, serverTimestamp, runTransaction, getDoc, getDocs, updateDoc, query, where, arrayUnion, arrayRemove, deleteField, DocumentReference } from 'firebase/firestore';
 import { firestore } from '../../lib/firebase';
 import { Trip, TripSetup } from '../../utils/calculations';
-import { FirestoreRecord, inviteExpiry, isPermissionDeniedError, nowIso, toIso, generateShortCode } from './utils';
+import { FirestoreRecord, inviteExpiry, isPermissionDeniedError, nowIso, toIso, createUniqueTripDoc } from './utils';
 import { migrateLegacyParticipants } from '../../utils/migration';
 import { claimMemberIdentity as claimMemberIdentityCore } from '../../utils/memberManagementCore';
 
@@ -43,41 +43,21 @@ export const useTripMutations = ({
         return true;
       }
 
-      let tripRef: DocumentReference | null = null;
-      let shortCode = '';
-
-      for (let i = 0; i < 10; i++) {
-        shortCode = generateShortCode();
-        const candidateRef = doc(firestore, 'trips', shortCode);
-        
-        try {
-          await runTransaction(firestore, async (transaction) => {
-            const snap = await transaction.get(candidateRef);
-            if (snap.exists()) throw new Error('COLLISION');
-            transaction.set(candidateRef, {
-              name: 'My Trip',
-              createdBy: userUid,
-              members: [userUid],
-              setup,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              inviteActive: true,
-              inviteExpiresAt: inviteExpiry(),
-            });
-          });
-          tripRef = candidateRef;
-          break;
-        } catch (e: any) {
-          if (e.message !== 'COLLISION') throw e;
-        }
-      }
-
-      if (!tripRef) throw new Error('Failed to generate a unique trip code after multiple attempts');
+      const tripRef = await createUniqueTripDoc(firestore, {
+        name: 'My Trip',
+        createdBy: userUid,
+        members: [userUid],
+        setup,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        inviteActive: true,
+        inviteExpiresAt: inviteExpiry(),
+      });
 
       const now = nowIso();
       setTripDocs((prev) => ({
         ...prev,
-        [tripRef!.id]: {
+        [tripRef.id]: {
           name: 'My Trip',
           createdBy: userUid,
           members: [userUid],
@@ -101,36 +81,17 @@ export const useTripMutations = ({
     if (!enabled || !firestore || !userUid) return null;
 
     try {
-      let tripRef: DocumentReference | null = null;
-      let shortCode = '';
+      const tripRef = await createUniqueTripDoc(firestore, {
+        name,
+        createdBy: userUid,
+        members: [userUid],
+        setup: initialSetup || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        inviteActive: true,
+        inviteExpiresAt: inviteExpiry(),
+      });
 
-      for (let attempt = 0; attempt < 10; attempt += 1) {
-        shortCode = generateShortCode();
-        const candidateRef = doc(firestore, 'trips', shortCode);
-        try {
-          await runTransaction(firestore, async (transaction) => {
-            const snap = await transaction.get(candidateRef);
-            if (snap.exists()) throw new Error('COLLISION');
-            transaction.set(candidateRef, {
-              name,
-              createdBy: userUid,
-              members: [userUid],
-              setup: initialSetup || null,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              inviteActive: true,
-              inviteExpiresAt: inviteExpiry(),
-            });
-          });
-          tripRef = candidateRef;
-          break;
-        } catch (e: any) {
-          if (e.message !== 'COLLISION') throw e;
-        }
-      }
-
-      if (!tripRef) throw new Error('Failed to generate a unique 6-digit invite code');
-      
       const verifySnap = await getDoc(tripRef);
       if (!verifySnap.exists()) {
         console.error('CRITICAL: Trip write succeeded but immediate getDoc failed.');
@@ -193,23 +154,14 @@ export const useTripMutations = ({
           inviteExpiresAt: inviteExpiry(),
         };
 
-        let tripRef: DocumentReference | null = null;
-        for (let attempt = 0; attempt < 10; attempt++) {
-          const candidateRef = doc(firestore, 'trips', generateShortCode());
-          try {
-            await runTransaction(firestore, async (transaction) => {
-              const snap = await transaction.get(candidateRef);
-              if (snap.exists()) throw new Error('COLLISION');
-              transaction.set(candidateRef, payload);
-            });
-            tripRef = candidateRef;
-            break;
-          } catch (e: any) {
-            if (e.message !== 'COLLISION') throw e;
-          }
+        // A single trip failing to get a unique code shouldn't abort the rest
+        // of the batch — skip it and keep importing the others.
+        let tripRef: DocumentReference;
+        try {
+          tripRef = await createUniqueTripDoc(firestore, payload);
+        } catch {
+          continue;
         }
-
-        if (!tripRef) continue;
 
         importedCount += 1;
         idMap.set(localTrip.id, tripRef.id);

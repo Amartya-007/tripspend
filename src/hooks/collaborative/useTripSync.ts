@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot, query, where, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore } from '../../lib/firebase';
 import { TripSetup } from '../../utils/calculations';
-import { FirestoreRecord, isPermissionDeniedError, ACTIVE_SHARED_TRIP_KEY, ACTIVE_TRIP_PRESERVE_MS } from './utils';
+import { FirestoreRecord, logSnapshotError, ACTIVE_SHARED_TRIP_KEY, ACTIVE_TRIP_PRESERVE_MS } from './utils';
 import { migrateLegacyParticipants } from '../../utils/migration';
 
 interface UseTripSyncInput {
@@ -92,15 +92,10 @@ export const useTripSync = ({ userUid, enabled, setCloudAccessDenied }: UseTripS
         return first;
       });
     }, (error) => {
-      const errCode = (error as { code?: string })?.code || 'unknown';
-      console.error(`[TripSpend] Trips listener error (${errCode}):`, error);
       // The listener will not deliver a snapshot after an error — mark loading
       // finished so the app can fall back instead of waiting forever.
       setTripsLoaded(true);
-      if (isPermissionDeniedError(error)) {
-        console.warn('[TripSpend] Permission denied on trips — setting cloudAccessDenied');
-        setCloudAccessDenied(true);
-      }
+      logSnapshotError('Trips', error, setCloudAccessDenied);
     });
 
     return () => {

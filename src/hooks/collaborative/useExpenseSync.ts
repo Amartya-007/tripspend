@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { firestore } from '../../lib/firebase';
 import { Expense, TripSetup } from '../../utils/calculations';
-import { FirestoreRecord, isPermissionDeniedError, nowIso } from './utils';
+import { FirestoreRecord, logSnapshotError } from './utils';
 import { toExpense } from './expenseParser';
 
 interface UseExpenseSyncInput {
@@ -91,12 +91,7 @@ export const useExpenseSync = ({
           initialSnapshotReceivedRef.current.add(tripId);
         }
       }, (error) => {
-        const errCode = (error as { code?: string })?.code || 'unknown';
-        console.error(`[TripSpend] Expenses listener error (${errCode}):`, error);
-        if (isPermissionDeniedError(error)) {
-          console.warn('[TripSpend] Permission denied on expenses — setting cloudAccessDenied');
-          setCloudAccessDenied(true);
-        }
+        logSnapshotError('Expenses', error, setCloudAccessDenied);
       });
 
       expensesUnsubMapRef.current.set(tripId, unsubscribeExpenses);

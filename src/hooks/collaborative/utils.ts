@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp, doc, runTransaction, type Firestore, type DocumentReference } from 'firebase/firestore';
 
 export type FirestoreRecord = Record<string, unknown>;
 
@@ -59,4 +59,54 @@ export const generateShortCode = (): string => {
     }
   }
   return result;
+};
+
+const TRIP_CODE_MAX_ATTEMPTS = 10;
+
+/**
+ * Creates a new /trips/{code} document under a fresh, collision-checked
+ * 6-digit invite code. Generates a candidate code, verifies (inside a
+ * transaction) that no trip already owns it, and writes `data` there.
+ * Retries on collision up to TRIP_CODE_MAX_ATTEMPTS times.
+ *
+ * Shared by every trip-creation path (manual setup save, named create,
+ * bulk local-trip import) so the retry/collision logic only lives once.
+ */
+export const createUniqueTripDoc = async (
+  db: Firestore,
+  data: FirestoreRecord,
+): Promise<DocumentReference> => {
+  for (let attempt = 0; attempt < TRIP_CODE_MAX_ATTEMPTS; attempt += 1) {
+    const candidateRef = doc(db, 'trips', generateShortCode());
+    try {
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(candidateRef);
+        if (snap.exists()) throw new Error('COLLISION');
+        transaction.set(candidateRef, data);
+      });
+      return candidateRef;
+    } catch (e: any) {
+      if (e.message !== 'COLLISION') throw e;
+    }
+  }
+  throw new Error('Failed to generate a unique 6-digit invite code after multiple attempts');
+};
+
+/**
+ * Standard onSnapshot(...) error handler: logs the failure, and — for
+ * permission-denied errors specifically — flips cloudAccessDenied so the UI
+ * can show the right fallback. Shared by every collection listener
+ * (trips, expenses, ...) so the logging/detection logic only lives once.
+ */
+export const logSnapshotError = (
+  label: string,
+  error: unknown,
+  setCloudAccessDenied: (denied: boolean) => void,
+) => {
+  const errCode = (error as { code?: string })?.code || 'unknown';
+  console.error(`[TripSpend] ${label} listener error (${errCode}):`, error);
+  if (isPermissionDeniedError(error)) {
+    console.warn(`[TripSpend] Permission denied on ${label.toLowerCase()} — setting cloudAccessDenied`);
+    setCloudAccessDenied(true);
+  }
 };
