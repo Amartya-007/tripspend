@@ -45,7 +45,13 @@ Rules JSON (paste into Firebase console → Realtime Database → Rules)
     "trips": {
       "$tripId": {
         "meta": {
-          ".read": "auth != null && root.child('trips').child($tripId).child('members').child(auth.uid).exists()",
+          ".read": "auth != null && (
+                // members can read
+                root.child('trips').child($tripId).child('members').child(auth.uid).exists()
+                ||
+                // or the creator (createdBy) can read before members are added
+                root.child('trips').child($tripId).child('meta').child('createdBy').val() === auth.uid
+              )",
           ".write": "auth != null && (
                 // creation: only creator may create meta
                 (!data.exists() && newData.child('createdBy').val() === auth.uid)
