@@ -1,6 +1,7 @@
 # Realtime Database Rules for TripSpend
 
 This file contains a recommended, secure Realtime Database ruleset for TripSpend that supports:
+
 - Personal backups (users/{uid}/trips/...)
 - Collaborative shared trips (trips/{tripId})
 - Invite codes / invite links (public_trips/{code}) that allow a user to join a trip by redeeming a code
@@ -8,6 +9,7 @@ This file contains a recommended, secure Realtime Database ruleset for TripSpend
 - Append-only immutable logs for auditing (logs cannot be updated or deleted once written)
 
 Design notes (client responsibilities)
+
 - When creating an invite the app should write an entry under `public_trips/{code}` with { tripId, createdBy, createdAt }
 - To redeem an invite code, the client should write a member node under `trips/{tripId}/members/{uid}` with an object like:
   { addedAt: TIMESTAMP_MS, addedByInvite: "<code>" }
@@ -43,7 +45,7 @@ Rules JSON (paste into Firebase console → Realtime Database → Rules)
     "trips": {
       "$tripId": {
         "meta": {
-          ".read": "auth != null && (newData.exists() ? true : true)",
+          ".read": "auth != null && root.child('trips').child($tripId).child('members').child(auth.uid).exists()",
           ".write": "auth != null && (
                 // creation: only creator may create meta
                 (!data.exists() && newData.child('createdBy').val() === auth.uid)
@@ -102,16 +104,19 @@ Rules JSON (paste into Firebase console → Realtime Database → Rules)
 ```
 
 How the invite flow should work (client implementation notes)
+
 - Trip creator creates a shared trip under `trips/{tripId}/meta` with `createdBy: auth.uid` and also writes `trips/{tripId}/members/{auth.uid}` with `{ addedAt: Date.now() }`.
 - To create an invite, creator writes `public_trips/{code} = { tripId, createdBy: auth.uid, createdAt: Date.now() }`.
 - To redeem an invite, the client (authenticated as the new user) writes `trips/{tripId}/members/{theirUid} = { addedAt: Date.now(), addedByInvite: '{code}' }`. The rules verify the code points to that trip.
 - Once a user is a member, they may create/update/delete expenses and append log entries. Members may also add or remove other members (member management is permitted to existing members).
 
 Audit log immutability
+
 - Log entries are append-only: rules only allow creating a log child when it does not exist yet (`!data.exists() && newData.exists()`). Attempting to overwrite or delete a log entry will be rejected by the rules.
 - Make sure the client always creates log entries with unique keys (e.g., push() IDs or a combined timestamp + random suffix) and includes `ts` (number), `actor` (user id or name), `action` (string), and optional `details` object.
 
 Testing and deployment
+
 - Paste the JSON into the Firebase console Rules editor and Publish.
 - Use the Rules Playground to simulate:
   - Creator writes `trips/{tripId}/meta` and `public_trips/{code}` as auth.uid == creator
@@ -120,6 +125,7 @@ Testing and deployment
   - Attempt to delete or modify a log entry (should be rejected)
 
 Caveats and edge cases
+
 - The invite redemption requires the client to include `addedByInvite` on the new member node. This is a client-side convention enforced by rules; do not rely on client-only checks — rules verify the mapping in `public_trips`.
 - If you want single-use invites, extend the flow: when redeeming, the client should write under `public_trips/{code}/redeemed/{theirUid}` and rules can restrict `public_trips/{code}` to be writable only by its creator unless already redeemed. Implementing single-use in rules alone is possible but requires careful race handling; server-side functions are more robust.
 - For strict immutability of logs, ensure no client-side code tries to update or delete logs. If you need to support log corrections, implement a separate "log-annotations" path rather than mutating the original log entry.
