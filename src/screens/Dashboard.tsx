@@ -46,6 +46,10 @@ interface DashboardProps {
   isTripCreator?: boolean;
   inviteActive?: boolean;
   onToggleInviteActive?: (active: boolean) => Promise<boolean>;
+  // Diagnostic flags forwarded from App
+  collaborativeAvailable?: boolean;
+  cloudAccessDenied?: boolean;
+  localActiveTripMigratable?: boolean;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -63,6 +67,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isTripCreator,
   inviteActive,
   onToggleInviteActive,
+  collaborativeAvailable = false,
+  cloudAccessDenied = false,
+  localActiveTripMigratable = false,
 }) => {
   const stats = useMemo(() => calculateStats(data), [data]);
   const todayDate = useMemo(() => startOfDay(new Date()), []);
@@ -118,6 +125,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             isTripCreator={isTripCreator}
             inviteActive={inviteActive}
             onToggleInviteActive={onToggleInviteActive}
+            collaborativeAvailable={collaborativeAvailable}
+            cloudAccessDenied={cloudAccessDenied}
+            localActiveTripMigratable={localActiveTripMigratable}
           />
         </div>
       )}

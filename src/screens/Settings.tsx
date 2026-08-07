@@ -51,6 +51,10 @@ interface SettingsProps {
   isTripCreator?: boolean;
   inviteActive?: boolean;
   onToggleInviteActive?: (active: boolean) => Promise<boolean>;
+  // Diagnostic flags forwarded from App
+  collaborativeAvailable?: boolean;
+  cloudAccessDenied?: boolean;
+  localActiveTripMigratable?: boolean;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -107,6 +111,9 @@ export const Settings: React.FC<SettingsProps> = ({
   isTripCreator,
   inviteActive,
   onToggleInviteActive,
+  collaborativeAvailable = false,
+  cloudAccessDenied = false,
+  localActiveTripMigratable = false,
 }) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -504,6 +511,9 @@ export const Settings: React.FC<SettingsProps> = ({
               isTripCreator={isTripCreator}
               inviteActive={inviteActive}
               onToggleInviteActive={onToggleInviteActive}
+              collaborativeAvailable={collaborativeAvailable}
+              cloudAccessDenied={cloudAccessDenied}
+              localActiveTripMigratable={localActiveTripMigratable}
             />
           </div>
         </Section>

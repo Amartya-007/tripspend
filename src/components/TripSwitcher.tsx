@@ -21,6 +21,10 @@ interface TripSwitcherProps {
   /** Whether the active trip's invite code currently accepts new joins. Defaults to true. */
   inviteActive?: boolean;
   onToggleInviteActive?: (active: boolean) => Promise<boolean>;
+  // Diagnostic flags supplied by App to explain why invites may be unavailable
+  collaborativeAvailable?: boolean; // firebaseConfigured && user present
+  cloudAccessDenied?: boolean; // whether cloud access is denied by rules or config
+  localActiveTripMigratable?: boolean; // whether the current local active trip is available to migrate to cloud
 }
 
 export function TripSwitcher({
@@ -349,9 +353,14 @@ Open TripSpend app → Settings → My Trips → Join and enter this 6-digit cod
                     </div>
                     <p className="text-sm font-bold text-slate-900">Invite to "{activeTripName}"</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {canShareInviteCode
-                        ? 'Friends can join using your 6-digit invite code.'
-                        : 'This trip is local-only. Switch to a shared 6-digit trip code to invite others.'}
+                      {canShareInviteCode ? 'Friends can join using your 6-digit invite code.' : (
+                        // Provide a diagnostic reason when invite is unavailable
+                        collaborativeAvailable === false ? 'Sign in and enable cloud sharing to generate invite codes.' : (
+                          cloudAccessDenied ? 'Cloud access is unavailable right now. Try again later.' : (
+                            localActiveTripMigratable === false ? 'This local trip cannot be migrated to the cloud (no setup found).' : 'This trip is local-only. Switch to a shared 6-digit trip code to invite others.'
+                          )
+                        )
+                      )}
                     </p>
                   </div>
 

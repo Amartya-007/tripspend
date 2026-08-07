@@ -64,6 +64,7 @@ interface SettlementProps {
   tripCreatorUid?: string | null;
   isCollaborative?: boolean;
   myMemberId?: string | null;
+  onCloudBackup?: () => void; // Optional callback to trigger manual cloud backup for local trips
 }
 
 export const Settlement: React.FC<SettlementProps> = ({
@@ -77,6 +78,7 @@ export const Settlement: React.FC<SettlementProps> = ({
   tripCreatorUid = null,
   isCollaborative = false,
   myMemberId: propMyMemberId = null,
+  onCloudBackup,
 }) => {
   const navigate = useNavigate();
   const proofInputRef = useRef<HTMLInputElement>(null);
@@ -305,23 +307,36 @@ export const Settlement: React.FC<SettlementProps> = ({
         return;
       }
     } else {
-      // Local mode: store in paidMap
-      setPaidMap(prev => {
-        const next = new Map(prev);
-        next.set(key, {
-          from: sheetPayload.from,
-          to: sheetPayload.to,
-          amount: sheetPayload.amount,
-          paidAt: new Date().toISOString(),
-          note: settlementNote.trim() || undefined,
-          proofImage: proofImage || undefined,
-          proofName: proofName || undefined,
-          fromMemberActive: isFromMemberActive(sheetPayload.from),
-          toMemberActive: isToMemberActive(sheetPayload.to),
-          creatorOverride,
-        });
-        return next;
-      });
+     // Local mode: store in paidMap
+     setPaidMap(prev => {
+       const next = new Map(prev);
+       next.set(key, {
+         from: sheetPayload.from,
+         to: sheetPayload.to,
+         amount: sheetPayload.amount,
+         paidAt: new Date().toISOString(),
+         note: settlementNote.trim() || undefined,
+         proofImage: proofImage || undefined,
+         proofName: proofName || undefined,
+         fromMemberActive: isFromMemberActive(sheetPayload.from),
+         toMemberActive: isToMemberActive(sheetPayload.to),
+         creatorOverride,
+       });
+       return next;
+     });
+
+     // If the app has a signed-in user but collaborative sync is not active, trigger an explicit cloud backup
+     // so local settlement changes are pushed to the user's cloud backup automatically.
+     try {
+       if (typeof onCloudBackup === 'function') {
+         onCloudBackup();
+       } else {
+         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         (typeof (window as any)._onCloudBackupTrigger === 'function') && (window as any)._onCloudBackupTrigger();
+       }
+     } catch (e) {
+       // Ignore backup trigger errors silently — backup will still be available from Settings.
+     }
     }
 
     appendHistory({ action: 'settled', from: sheetPayload.from, to: sheetPayload.to, amount: sheetPayload.amount, note: settlementNote });
@@ -362,6 +377,17 @@ export const Settlement: React.FC<SettlementProps> = ({
         proofName: proofName || undefined,
       }));
       setPaidMap(prev => { const next = new Map(prev); next.delete(key); return next; });
+
+      try {
+        if (typeof onCloudBackup === 'function') {
+          onCloudBackup();
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (typeof (window as any)._onCloudBackupTrigger === 'function') && (window as any)._onCloudBackupTrigger();
+        }
+      } catch (e) {
+        // ignore errors
+      }
     }
 
     appendHistory({ action: 'settled', from: sheetPayload.from, to: sheetPayload.to, amount: sheetPayload.amount, note: settlementNote, proofImage: proofImage || undefined, proofName: proofName || undefined });

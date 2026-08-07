@@ -26,6 +26,8 @@ import { PreSetupTripChoice } from './components/PreSetupTripChoice';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { NotificationRoute, useSmartReminders } from './hooks/useSmartReminders';
 import { saveTripToCloud, loadAllTripsFromCloud, syncTripIncremental } from './services/cloudTrip';
+// Realtime DB adapter (feature branch)
+import { saveTripToRealtime, loadAllTripsFromRealtime, syncTripIncrementalRealtime } from './services/realtimeTrip';
 import { clearAccountScopedStorage } from './utils/privacy';
 import { buildDisplayNameMap } from './utils/memberDisplay';
 
@@ -501,6 +503,11 @@ export default function App() {
   // Regular create should follow the active store mode.
   const createTrip = tripStore.createTrip;
 
+  // Diagnostic flags for invite generation UI
+  const collaborativeAvailable = collaborativeModeRequested; // true when firebase configured and user is present
+  const cloudAccessDenied = Boolean(collaborativeTripStore.cloudAccessDenied);
+  const localActiveTripMigratable = Boolean(localTripsForMigration.find((t) => t.id === localActiveTripId));
+
   // Invite code generation is an explicit cloud action. If the user is already on a
   // shared cloud trip, its doc id *is* the invite code — no new trip needed. Otherwise
   // this is a local-only trip being shared for the first time, so we migrate its actual
@@ -526,14 +533,49 @@ export default function App() {
     const currentLocalTrip = localTripsForMigration.find((trip) => trip.id === localActiveTripId);
     if (!currentLocalTrip) {
       console.error('[generateInviteCode] No local trip found to migrate.', { localActiveTripId, availableTripIds: localTripsForMigration.map((trip) => trip.id) });
+      notify?.({ title: 'Invite unavailable', message: 'No local trip data available to migrate. Open the trip and ensure setup exists before generating an invite.', variant: 'warning' });
       return null;
     }
 
-    const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
-    if (typeof created === 'string' && /^\d+$/.test(created)) return created;
-    console.error('[generateInviteCode] importLocalTrips did not return a usable cloud trip id.', { created });
-    return null;
-  }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore]);
+    try {
+      const created = await collaborativeTripStore.importLocalTrips([currentLocalTrip], currentLocalTrip.id);
+      if (typeof created === 'string' && /^\d+$/.test(created)) return created;
+      console.error('[generateInviteCode] importLocalTrips did not return a usable cloud trip id.', { created });
+
+      // If cloud access was denied during import, surface an actionable message
+      if (collaborativeTripStore.cloudAccessDenied) {
+        notify?.({
+          title: 'Cloud Permission Denied',
+          message: 'Missing or insufficient permissions to write to the cloud. Attempting to save a one-off backup instead.',
+          variant: 'error',
+        });
+
+        // Try a fallback: save a one-off cloud backup under users/{uid}/trips so the data is not lost.
+        try {
+          // Fallback: try writing to Realtime Database instead of Firestore (branch feature)
+          try {
+            await saveTripToRealtime(user.uid, currentLocalTrip);
+            notify?.({ title: 'Backup saved', message: 'Local trip backed up to your Realtime Database backups (no invite code created).', variant: 'success' });
+          } catch (err) {
+            console.error('[generateInviteCode] fallback saveTripToRealtime failed', err);
+            notify?.({ title: 'Backup failed', message: 'Could not save backup. Check Firebase configuration and permissions.', variant: 'error' });
+          }
+
+          return null;
+        }
+
+      notify?.({ title: 'Invite unavailable', message: 'Could not generate an invite code. Try again later.', variant: 'error' });
+      return null;
+    } catch (err) {
+      console.error('[generateInviteCode] threw', err);
+      if ((err as Error).message && (err as Error).message.toLowerCase().includes('permission')) {
+        notify?.({ title: 'Cloud Permission Denied', message: 'Missing or insufficient permissions to write to Firestore. Check Firestore rules and your authenticated account.', variant: 'error' });
+      } else {
+        notify?.({ title: 'Invite unavailable', message: 'Could not generate an invite code. Try again later.', variant: 'error' });
+      }
+      return null;
+    }
+  }, [collaborativeModeRequested, usingCollaborativeStore, activeTrip, localTripsForMigration, localActiveTripId, collaborativeTripStore, notify]);
 
   // Only the trip's creator may revoke/reactivate its invite code — enforced again
   // server-side by onlyCreatorInviteControl().
@@ -1104,6 +1146,9 @@ export default function App() {
                     isTripCreator={isActiveTripCreator}
                     inviteActive={activeTripInviteActive}
                     onToggleInviteActive={handleToggleInviteActive}
+                    collaborativeAvailable={collaborativeAvailable}
+                    cloudAccessDenied={cloudAccessDenied}
+                    localActiveTripMigratable={localActiveTripMigratable}
                   />
                 }
               />
@@ -1130,6 +1175,7 @@ export default function App() {
                     tripCreatorUid={usingCollaborativeStore ? collaborativeTripStore.tripCreatorUid : user?.uid || null}
                     identityMap={collaborativeTripStore.identityMap}
                     myMemberId={collaborativeTripStore.myMemberId}
+                    onCloudBackup={handleCloudBackup}
                   />
                 }
               />
@@ -1282,6 +1328,9 @@ export default function App() {
                     isTripCreator={isActiveTripCreator}
                     inviteActive={activeTripInviteActive}
                     onToggleInviteActive={handleToggleInviteActive}
+                    collaborativeAvailable={collaborativeAvailable}
+                    cloudAccessDenied={cloudAccessDenied}
+                    localActiveTripMigratable={localActiveTripMigratable}
                   />
                 }
               />
