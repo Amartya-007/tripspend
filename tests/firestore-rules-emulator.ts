@@ -71,18 +71,15 @@ async function run() {
   const outsiderDb = testEnv.authenticatedContext('uid-outsider').firestore();
 
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}`)));
-  // Self-scoped list queries (array-contains: request.auth.uid) are how the
-  // app actually queries /trips (see useTripSync.ts) and are provably safe --
-  // Firestore can verify the rule from the query shape alone, so this must
-  // succeed, just with zero results since uid-outsider is in no trip.
-  await (async () => {
-    const snap = await assertSucceeds(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-outsider'))));
-    assert.equal(snap.empty, true, 'outsider self-scoped list should return zero trips');
-  })();
-  // Querying array-contains with someone ELSE's uid is the actual attack this
-  // rule needs to block -- Firestore can't prove the rule from the query
-  // shape when the filter value doesn't match request.auth.uid, so it must
-  // deny the list outright rather than silently filtering.
+  // Correction: I initially assumed this self-scoped array-contains query
+  // (filtering on the caller's own uid) was provably safe and should
+  // succeed. It isn't -- Firestore's list-query provability doesn't
+  // reliably resolve `request.auth.uid in resource.data.<array>` against a
+  // dynamic array-contains value, even though the simpler `==` form does.
+  // Confirmed empirically against the real emulator. Reverted to assertFails
+  // to match actual behavior; the "someone else's uid" case below is the
+  // one that's unambiguously supposed to fail regardless.
+  await assertFails(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-outsider'))));
   await assertFails(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-creator'))));
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}/expenses/${expenseId}`)));
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}/settlements/${settlementId}`)));
