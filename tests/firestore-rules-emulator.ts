@@ -193,6 +193,15 @@ async function run() {
     name: 'Renamed via invite control',
     updatedAt: '2026-04-10T00:08:00.000Z',
   }));
+  // Same smuggling attempt, but via a brand-new field the document has never
+  // had (rather than an existing one being changed). This is exactly the gap
+  // between .changedKeys() (misses new fields) and .affectedKeys() (catches
+  // adds too) -- confirmed failing against the real emulator before the fix.
+  await assertFails(updateDoc(doc(creatorDb, `trips/${tripId}`), {
+    inviteActive: false,
+    neverBeforeSetField: 'smuggled',
+    updatedAt: '2026-04-10T00:08:30.000Z',
+  }));
 
   // ── New: creator-only member removal actually revokes access ───────────────
   // Non-creator cannot remove another member.

@@ -54,7 +54,7 @@ service cloud.firestore {
           resource.data.get('inviteExpiresAt', null) == null
           || (resource.data.inviteExpiresAt is timestamp && resource.data.inviteExpiresAt > request.time)
         )
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['members', 'updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'updatedAt']);
     }
 
     // Lets the trip creator revoke/reactivate the invite code and control its expiry,
@@ -70,7 +70,7 @@ service cloud.firestore {
           || request.resource.data.inviteExpiresAt == null
           || request.resource.data.inviteExpiresAt is timestamp
         )
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['inviteActive', 'inviteExpiresAt', 'updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inviteActive', 'inviteExpiresAt', 'updatedAt']);
     }
 
     // Lets the trip creator remove exactly one other member's Firestore access
@@ -84,11 +84,11 @@ service cloud.firestore {
         && request.resource.data.members.size() == resource.data.members.size() - 1
         && resource.data.members.hasAll(request.resource.data.members)
         && uid() in request.resource.data.members
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['members', 'identityMap', 'updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'identityMap', 'updatedAt']);
     }
 
     function identityMapForwardUnique() {
-      return !(request.resource.data.diff(resource.data).changedKeys().hasAny(['identityMap']))
+      return !(request.resource.data.diff(resource.data).affectedKeys().hasAny(['identityMap']))
         || !(resource.data.identityMap is map && uid() in resource.data.identityMap)
         || request.resource.data.identityMap[uid()] == resource.data.identityMap[uid()];
     }
@@ -194,7 +194,7 @@ service cloud.firestore {
         allow read: if isTripMember(tripId);
         allow create: if isTripMember(tripId) && isValidPayer(request.resource.data);
         allow update: if isTripMember(tripId) 
-                      && (!request.resource.data.diff(resource.data).changedKeys().hasAny(['payerId', 'paidBy']) 
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['payerId', 'paidBy']) 
                           || isValidPayer(request.resource.data));
         allow delete: if isTripMember(tripId);
       }
