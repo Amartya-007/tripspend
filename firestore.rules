@@ -33,6 +33,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/trips/$(tripId)).data.createdBy == uid();
     }
 
+    // A regular (non-creator-override) settlement write must always carry
+    // creatorOverride == false. Shared by every settlement create/transition
+    // path below so the check only lives once.
+    function noOverride() {
+      return request.resource.data.get('creatorOverride', false) == false;
+    }
+
     // Validates a join operation: only appends the caller's own uid, nothing else changes.
     function onlyJoinSelf() {
       return signedIn()
@@ -207,7 +214,7 @@ service cloud.firestore {
           && request.resource.data.toUserId   == null
           && request.resource.data.status     == 'pending'
           && (
-            request.resource.data.get('creatorOverride', false) == false
+            noOverride()
             || (isTripCreator(tripId) && request.resource.data.creatorOverride == true)
           );
 
@@ -235,7 +242,7 @@ service cloud.firestore {
               && request.resource.data.status       == resource.data.status
               && request.resource.data.fromUserId   == resource.data.fromUserId
               && request.resource.data.toUserId     == resource.data.toUserId
-              && request.resource.data.get('creatorOverride', false) == false
+              && noOverride()
               && request.resource.data.diff(resource.data).affectedKeys()
                    .hasOnly(['fromMemberActive', 'toMemberActive', 'updatedAt'])
             )
@@ -264,7 +271,7 @@ service cloud.firestore {
                   && request.resource.data.fromUserId == uid()
                   && resource.data.toUserId        == null
                   && request.resource.data.toUserId == null
-                  && request.resource.data.get('creatorOverride', false) == false
+                  && noOverride()
                 )
 
                 ||
@@ -277,7 +284,7 @@ service cloud.firestore {
                   && request.resource.data.fromUserId == uid()
                   && resource.data.toUserId        == null
                   && request.resource.data.toUserId == null
-                  && request.resource.data.get('creatorOverride', false) == false
+                  && noOverride()
                 )
 
                 ||
@@ -290,7 +297,7 @@ service cloud.firestore {
                   && request.resource.data.toUserId == uid()
                   && request.resource.data.fromUserId == resource.data.fromUserId
                   && isTripMember(tripId)
-                  && request.resource.data.get('creatorOverride', false) == false
+                  && noOverride()
                 )
 
                 ||
@@ -301,7 +308,7 @@ service cloud.firestore {
                   && request.resource.data.status == 'pending'
                   && resource.data.toUserId        == uid()
                   && request.resource.data.fromUserId == resource.data.fromUserId
-                  && request.resource.data.get('creatorOverride', false) == false
+                  && noOverride()
                 )
 
                 ||

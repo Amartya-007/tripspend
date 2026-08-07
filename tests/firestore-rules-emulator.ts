@@ -71,7 +71,19 @@ async function run() {
   const outsiderDb = testEnv.authenticatedContext('uid-outsider').firestore();
 
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}`)));
-  await assertFails(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-outsider'))));
+  // Self-scoped list queries (array-contains: request.auth.uid) are how the
+  // app actually queries /trips (see useTripSync.ts) and are provably safe --
+  // Firestore can verify the rule from the query shape alone, so this must
+  // succeed, just with zero results since uid-outsider is in no trip.
+  await (async () => {
+    const snap = await assertSucceeds(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-outsider'))));
+    assert.equal(snap.empty, true, 'outsider self-scoped list should return zero trips');
+  })();
+  // Querying array-contains with someone ELSE's uid is the actual attack this
+  // rule needs to block -- Firestore can't prove the rule from the query
+  // shape when the filter value doesn't match request.auth.uid, so it must
+  // deny the list outright rather than silently filtering.
+  await assertFails(getDocs(query(collection(outsiderDb, 'trips'), where('members', 'array-contains', 'uid-creator'))));
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}/expenses/${expenseId}`)));
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}/settlements/${settlementId}`)));
   await assertFails(getDoc(doc(outsiderDb, `trips/${tripId}/settlementHistory/${historyId}`)));
