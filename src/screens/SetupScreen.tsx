@@ -442,6 +442,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                     placeholder="e.g. Goa Friends 2026"
                     maxLength={MAX_TRIP_NAME_LENGTH}
                     className="input-field text-sm"
+                    autoFocus
                   />
                   <p className="text-[11px] text-slate-400 mt-1 text-right">{tripName.length}/{MAX_TRIP_NAME_LENGTH}</p>
                 </div>
@@ -454,7 +455,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSave, initialData, o
                   Number of People
                 </label>
                 <input
-                  type="number" min={MIN_PEOPLE} max={MAX_PEOPLE} autoFocus
+                  type="number" min={MIN_PEOPLE} max={MAX_PEOPLE}
                   value={peopleCount}
                   onChange={(e) => handlePeopleCountChange(e.target.value)}
                   placeholder="e.g. 4"
