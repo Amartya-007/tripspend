@@ -5,6 +5,7 @@ import { Trip, TripSetup } from '../../utils/calculations';
 import { FirestoreRecord, inviteExpiry, isPermissionDeniedError, nowIso, toIso, createUniqueTripDoc } from './utils';
 import { migrateLegacyParticipants } from '../../utils/migration';
 import { claimMemberIdentity as claimMemberIdentityCore } from '../../utils/memberManagementCore';
+import { mirrorCreateSharedTrip, mirrorJoinTrip, mirrorRemoveMember } from '../../services/realtimeTrip';
 
 interface UseTripMutationsInput {
   enabled: boolean;
@@ -68,6 +69,10 @@ export const useTripMutations = ({
           inviteExpiresAt: inviteExpiry().toISOString(),
         },
       }));
+
+      // Best-effort RTDB mirror — Firestore above is already the durable write.
+      void mirrorCreateSharedTrip(tripRef.id, userUid);
+
       setActiveTripWithPreserve(tripRef.id);
       return true;
     } catch (error) {
@@ -97,6 +102,9 @@ export const useTripMutations = ({
         console.error('CRITICAL: Trip write succeeded but immediate getDoc failed.');
         throw new Error('Trip write verification failed');
       }
+
+      // Best-effort RTDB mirror — Firestore above is already the durable write.
+      void mirrorCreateSharedTrip(tripRef.id, userUid);
 
       setActiveTripWithPreserve(tripRef.id);
       return tripRef.id;
@@ -216,6 +224,10 @@ export const useTripMutations = ({
         members: arrayUnion(userUid),
         updatedAt: serverTimestamp(),
       });
+
+      // Best-effort RTDB mirror — Firestore above is already the durable write.
+      void mirrorJoinTrip(cleaned, userUid);
+
       setActiveTripWithPreserve(cleaned);
       return true;
     } catch (error) {
@@ -309,6 +321,10 @@ export const useTripMutations = ({
         [`identityMap.${memberUid}`]: deleteField(),
         updatedAt: serverTimestamp(),
       });
+
+      // Best-effort RTDB mirror — Firestore above is already the durable write.
+      void mirrorRemoveMember(tripId, userUid, memberUid);
+
       return true;
     } catch (error) {
       console.error('Failed to remove member access', error);

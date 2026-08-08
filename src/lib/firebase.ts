@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, initializeFirestore, persistentLocalCache, doc, getDocFromServer } from 'firebase/firestore';
+import { getDatabase, type Database } from 'firebase/database';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -11,6 +12,9 @@ const firebaseConfig = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  // Only needed for Realtime Database — Firestore doesn't use this.
+  // Find it in Firebase Console -> Realtime Database -> the URL shown above your data tree.
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
 };
 
 const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)';
@@ -41,6 +45,21 @@ export const firestore = (() => {
 export const db = firestore;
 
 const storage = firebaseApp ? getStorage(firebaseApp) : null;
+
+// Realtime Database. This is a separate Firebase product from Firestore and
+// requires its own instance to be created in the Firebase Console first
+// (Build -> Realtime Database -> Create Database), plus VITE_FIREBASE_DATABASE_URL
+// set to that instance's URL. `rtdb` stays null until both exist, so callers
+// must check for null rather than assume it's configured just because
+// Firestore is.
+export const rtdb: Database | null = (() => {
+  if (!firebaseApp || !firebaseConfig.databaseURL) return null;
+  try {
+    return getDatabase(firebaseApp);
+  } catch {
+    return null;
+  }
+})();
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
